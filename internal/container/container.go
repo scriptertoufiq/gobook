@@ -127,7 +127,7 @@ func Build(db *gorm.DB, cfg *config.Config) (*Container, error) {
 	// callback rather than a constructor argument.
 	userService.OnEmailNeedsVerification(authService.HandleEmailNeedsVerification)
 
-	postService := services.NewPostService(postRepo)
+	postService := services.NewPostService(postRepo, cacheStore, cfg.Redis.DefaultTTL)
 	// codegen:services
 
 	// Background jobs

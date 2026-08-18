@@ -3,7 +3,9 @@ package services
 import (
 	"context"
 	"errors"
+	"log"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/scriptertoufiq/go-mvc/internal/repositories"
 	"github.com/scriptertoufiq/go-mvc/internal/requests"
 	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
+	"github.com/scriptertoufiq/go-mvc/pkg/cache"
 	"github.com/scriptertoufiq/go-mvc/pkg/pagination"
 )
 
@@ -29,11 +32,31 @@ func ownedBy(post *models.Post, callerID uint) bool {
 }
 
 type PostService struct {
-	repo repositories.PostRepository
+	repo  repositories.PostRepository
+	cache cache.Cache
+	ttl   time.Duration
 }
 
-func NewPostService(repo repositories.PostRepository) *PostService {
-	return &PostService{repo: repo}
+func NewPostService(repo repositories.PostRepository, store cache.Cache, ttl time.Duration) *PostService {
+	return &PostService{repo: repo, cache: store, ttl: ttl}
+}
+
+// postCacheKey is the single place the key format lives, so the read that
+// populates it and the writes that clear it can never drift apart.
+func postCacheKey(id uint) string {
+	return cache.Key("posts", "show", id)
+}
+
+// forget drops a post's cached copy.
+//
+// Called after a write succeeds. A failure here is logged rather than
+// returned: the write is already durable, so reporting an error would invite
+// the client to retry an operation that worked. The cost is a stale read
+// bounded by the TTL, which is why the default is short.
+func (s *PostService) forget(ctx context.Context, id uint) {
+	if err := s.cache.Delete(ctx, postCacheKey(id)); err != nil {
+		log.Printf("cache: could not invalidate post %d, reads may be stale until it expires: %v", id, err)
+	}
 }
 
 // List returns a page of posts, optionally narrowed to a single author.
@@ -49,7 +72,36 @@ func (s *PostService) List(
 	return posts, pagination.NewMeta(p, total), nil
 }
 
+// Get returns a single post, served from cache when it is there.
+//
+// Read-through: a miss falls to the database and stores the result, so the
+// next reader is spared the query. A value type rather than a pointer is
+// cached, which makes a decoded `null` impossible — there is no nil for a
+// caller to dereference.
+//
+// Only successful lookups are cached. Remember returns early when compute
+// fails, so a 404 is never stored — otherwise a post created moments after
+// somebody probed for it would stay "missing" for the whole TTL.
 func (s *PostService) Get(ctx context.Context, id uint) (*models.Post, error) {
+	post, err := cache.Remember(ctx, s.cache, postCacheKey(id), s.ttl,
+		func() (models.Post, error) {
+			found, err := s.fetch(ctx, id)
+			if err != nil {
+				return models.Post{}, err
+			}
+			return *found, nil
+		})
+	if err != nil {
+		return nil, err
+	}
+
+	return &post, nil
+}
+
+// fetch reads a post straight from the database, bypassing the cache. It is
+// what Get falls back to on a miss, and what the write paths use so an edit is
+// never applied to a stale copy.
+func (s *PostService) fetch(ctx context.Context, id uint) (*models.Post, error) {
 	post, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -86,7 +138,9 @@ func (s *PostService) Update(
 	callerID uint,
 	req requests.UpdatePostRequest,
 ) (*models.Post, error) {
-	post, err := s.Get(ctx, id)
+	// fetch, not Get: an update must be computed from the row as it is in the
+	// database, never from a cached copy that may already be behind.
+	post, err := s.fetch(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -105,12 +159,18 @@ func (s *PostService) Update(
 	if err := s.repo.Update(ctx, post); err != nil {
 		return nil, apperror.Internal(err)
 	}
+
+	// Invalidate rather than overwrite. Writing the new value back would race
+	// with any concurrent update, and could leave the cache holding a version
+	// the database never had; dropping the key makes the next read authoritative.
+	s.forget(ctx, id)
+
 	return post, nil
 }
 
 // Delete soft-deletes a post. Only its author may do so.
 func (s *PostService) Delete(ctx context.Context, id uint, callerID uint) error {
-	post, err := s.Get(ctx, id)
+	post, err := s.fetch(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -122,6 +182,11 @@ func (s *PostService) Delete(ctx context.Context, id uint, callerID uint) error 
 	if err := s.repo.Delete(ctx, id); err != nil {
 		return apperror.Internal(err)
 	}
+
+	// Without this a deleted post keeps being served until its TTL runs out,
+	// which is the most visible way a cache can be wrong.
+	s.forget(ctx, id)
+
 	return nil
 }
 
