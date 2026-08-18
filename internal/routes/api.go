@@ -68,6 +68,19 @@ func registerAPI(api *gin.RouterGroup, c *container.Container) {
 		users.DELETE("/:id", admin, c.User.Destroy)
 	}
 
+	// Posts. Any verified user may publish; editing and deleting are limited
+	// to the author, or an admin, which PostService enforces after loading the
+	// row — `:id` here is a post id, so route middleware cannot judge ownership.
+	posts := api.Group("/posts", authenticated, verified)
+	{
+		posts.GET("", c.Post.Index)
+		posts.POST("", c.Post.Store)
+		posts.GET("/:id", c.Post.Show)
+		posts.PATCH("/:id", c.Post.Update)
+		posts.PUT("/:id", c.Post.Update)
+		posts.DELETE("/:id", c.Post.Destroy)
+	}
+
 	// codegen:routes
 	//
 	// Scaffolded resources land here. `go run ./cmd/make` emits them behind

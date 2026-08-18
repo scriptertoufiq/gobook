@@ -26,6 +26,7 @@ type Container struct {
 	Health *controllers.HealthController
 	Auth   *controllers.AuthController
 	User   *controllers.UserController
+	Post   *controllers.PostController
 	// codegen:fields
 
 	// JWT is exposed so the route table can build auth middleware from it.
@@ -83,6 +84,7 @@ func Build(db *gorm.DB, cfg *config.Config) *Container {
 	refreshTokenRepo := repositories.NewRefreshTokenRepository(db)
 	verificationRepo := repositories.NewEmailVerificationRepository(db)
 	passwordResetRepo := repositories.NewPasswordResetRepository(db)
+	postRepo := repositories.NewPostRepository(db)
 	// codegen:repositories
 
 	// Services
@@ -103,6 +105,8 @@ func Build(db *gorm.DB, cfg *config.Config) *Container {
 	// AuthService depends on UserService, so the reverse direction is a
 	// callback rather than a constructor argument.
 	userService.OnEmailNeedsVerification(authService.HandleEmailNeedsVerification)
+
+	postService := services.NewPostService(postRepo)
 	// codegen:services
 
 	// Background jobs
@@ -114,6 +118,7 @@ func Build(db *gorm.DB, cfg *config.Config) *Container {
 		Health: controllers.NewHealthController(db, cfg.App.Name),
 		Auth:   controllers.NewAuthController(authService, userService),
 		User:   controllers.NewUserController(userService),
+		Post:   controllers.NewPostController(postService),
 		// codegen:controllers
 
 		JWT:                      jwtManager,
