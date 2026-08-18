@@ -5,20 +5,22 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
+	"github.com/scriptertoufiq/go-mvc/pkg/cache"
 	"github.com/scriptertoufiq/go-mvc/pkg/response"
 )
 
 type HealthController struct {
-	db  *gorm.DB
-	app string
+	db    *gorm.DB
+	cache cache.Cache
+	app   string
 }
 
-func NewHealthController(db *gorm.DB, appName string) *HealthController {
-	return &HealthController{db: db, app: appName}
+func NewHealthController(db *gorm.DB, store cache.Cache, appName string) *HealthController {
+	return &HealthController{db: db, cache: store, app: appName}
 }
 
-// Show handles GET /health — a real readiness probe that pings the database
-// rather than just proving the process is alive.
+// Show handles GET /health — a real readiness probe that pings its
+// dependencies rather than just proving the process is alive.
 func (ctrl *HealthController) Show(c *gin.Context) {
 	sqlDB, err := ctrl.db.DB()
 	if err != nil {
@@ -31,9 +33,24 @@ func (ctrl *HealthController) Show(c *gin.Context) {
 		return
 	}
 
+	// The cache is reported, not enforced. Losing Redis costs speed, not
+	// correctness, so it must not take a healthy instance out of the load
+	// balancer — the database, which the app genuinely cannot serve without,
+	// still does.
 	response.OK(c, gin.H{
 		"app":      ctrl.app,
 		"status":   "ok",
 		"database": "connected",
+		"cache":    ctrl.cacheStatus(c),
 	})
+}
+
+func (ctrl *HealthController) cacheStatus(c *gin.Context) string {
+	if _, disabled := ctrl.cache.(cache.Null); disabled {
+		return "disabled"
+	}
+	if err := ctrl.cache.Ping(c.Request.Context()); err != nil {
+		return "unreachable"
+	}
+	return "connected"
 }

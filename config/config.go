@@ -20,7 +20,36 @@ type Config struct {
 	Auth      AuthConfig
 	Mail      MailConfig
 	RateLimit RateLimitConfig
+	Redis     RedisConfig
 }
+
+// RedisConfig configures the cache. Enabled is the switch: when false nothing
+// connects and cache.Null is used, so the application behaves identically —
+// correct, just without the speed-up.
+type RedisConfig struct {
+	Enabled  bool
+	Host     string
+	Port     string
+	Username string
+	Password string
+	DB       int
+
+	// Prefix namespaces every key so one Redis instance can safely back several
+	// applications, or several environments.
+	Prefix string
+
+	DialTimeout time.Duration
+	Timeout     time.Duration
+	PoolSize    int
+
+	// DefaultTTL is how long a cached entry lives when the caller does not
+	// specify. Short by default: a stale read is a bug report you cannot
+	// reproduce, so the cache should forget quickly until proven otherwise.
+	DefaultTTL time.Duration
+}
+
+// Addr is the host:port the Redis client expects.
+func (r RedisConfig) Addr() string { return r.Host + ":" + r.Port }
 
 // RateLimitConfig throttles callers. Two tiers: a general allowance for the
 // whole API, and a much tighter one for the auth endpoints, which send mail and
@@ -166,6 +195,19 @@ func Load() *Config {
 			Password:    env("MAIL_PASSWORD", ""),
 			FromAddress: env("MAIL_FROM_ADDRESS", ""),
 			FromName:    env("MAIL_FROM_NAME", "go-mvc"),
+		},
+		Redis: RedisConfig{
+			Enabled:     envBool("REDIS_ENABLED", false),
+			Host:        env("REDIS_HOST", "127.0.0.1"),
+			Port:        env("REDIS_PORT", "6379"),
+			Username:    env("REDIS_USERNAME", ""),
+			Password:    env("REDIS_PASSWORD", ""),
+			DB:          envInt("REDIS_DB", 0),
+			Prefix:      env("REDIS_PREFIX", "go-mvc"),
+			DialTimeout: time.Duration(envInt("REDIS_DIAL_TIMEOUT", 5)) * time.Second,
+			Timeout:     time.Duration(envInt("REDIS_TIMEOUT", 3)) * time.Second,
+			PoolSize:    envInt("REDIS_POOL_SIZE", 10),
+			DefaultTTL:  time.Duration(envInt("CACHE_DEFAULT_TTL", 300)) * time.Second,
 		},
 		DB: DBConfig{
 			Host:            env("DB_HOST", "127.0.0.1"),

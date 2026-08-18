@@ -73,7 +73,11 @@ func New() (*App, error) {
 		middleware.CORS(cfg.App.CORSAllowedOrigins),
 	)
 
-	c := container.Build(db, cfg)
+	c, err := container.Build(db, cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	routes.Register(engine, c)
 
 	if cfg.RateLimit.Enabled {

@@ -7,6 +7,7 @@
 package container
 
 import (
+	"log"
 	"sync"
 
 	"gorm.io/gorm"
@@ -15,6 +16,7 @@ import (
 	"github.com/scriptertoufiq/go-mvc/internal/controllers"
 	"github.com/scriptertoufiq/go-mvc/internal/repositories"
 	"github.com/scriptertoufiq/go-mvc/internal/services"
+	"github.com/scriptertoufiq/go-mvc/pkg/cache"
 	"github.com/scriptertoufiq/go-mvc/pkg/jwt"
 	"github.com/scriptertoufiq/go-mvc/pkg/mailer"
 	"github.com/scriptertoufiq/go-mvc/pkg/ratelimit"
@@ -33,6 +35,10 @@ type Container struct {
 	JWT *jwt.Manager
 	// RequireEmailVerification mirrors the config flag for the same reason.
 	RequireEmailVerification bool
+
+	// Cache is never nil — cache.Null stands in when REDIS_ENABLED=false, so
+	// callers need no branch for the disabled case.
+	Cache cache.Cache
 
 	// Throttles. Nil when RATE_LIMIT_ENABLED=false, which the middleware
 	// treats as a pass-through.
@@ -55,14 +61,29 @@ func (c *Container) Close() {
 				l.Stop()
 			}
 		}
+
+		if c.Cache != nil {
+			if err := c.Cache.Close(); err != nil {
+				log.Printf("shutdown: closing cache: %v", err)
+			}
+		}
 	})
 }
 
 // Build assembles the dependency graph bottom-up: repositories -> services ->
 // controllers. Adding a resource means adding three lines here.
-func Build(db *gorm.DB, cfg *config.Config) *Container {
+//
+// It returns an error because infrastructure is now opened here, not just
+// constructed: an unreachable Redis with REDIS_ENABLED=true must stop the boot
+// rather than be discovered on the first cached read.
+func Build(db *gorm.DB, cfg *config.Config) (*Container, error) {
 	// Infrastructure
 	jwtManager := jwt.NewManager(cfg.JWT.Secret, cfg.JWT.Issuer, cfg.JWT.AccessTTL)
+
+	cacheStore, err := buildCache(cfg)
+	if err != nil {
+		return nil, err
+	}
 
 	var apiLimiter, authLimiter *ratelimit.Limiter
 	if cfg.RateLimit.Enabled {
@@ -115,7 +136,7 @@ func Build(db *gorm.DB, cfg *config.Config) *Container {
 
 	// Controllers
 	return &Container{
-		Health: controllers.NewHealthController(db, cfg.App.Name),
+		Health: controllers.NewHealthController(db, cacheStore, cfg.App.Name),
 		Auth:   controllers.NewAuthController(authService, userService),
 		User:   controllers.NewUserController(userService),
 		Post:   controllers.NewPostController(postService),
@@ -123,8 +144,36 @@ func Build(db *gorm.DB, cfg *config.Config) *Container {
 
 		JWT:                      jwtManager,
 		RequireEmailVerification: cfg.Auth.RequireEmailVerification,
+		Cache:                    cacheStore,
 		APIRateLimiter:           apiLimiter,
 		AuthRateLimiter:          authLimiter,
 		stopBackground:           stopBackground,
+	}, nil
+}
+
+// buildCache opens Redis, or returns the no-op cache when caching is off.
+func buildCache(cfg *config.Config) (cache.Cache, error) {
+	if !cfg.Redis.Enabled {
+		log.Println("cache: disabled (REDIS_ENABLED=false)")
+		return cache.NewNull(), nil
 	}
+
+	store, err := cache.NewRedis(cache.Options{
+		Addr:        cfg.Redis.Addr(),
+		Username:    cfg.Redis.Username,
+		Password:    cfg.Redis.Password,
+		DB:          cfg.Redis.DB,
+		Prefix:      cfg.Redis.Prefix,
+		DialTimeout: cfg.Redis.DialTimeout,
+		Timeout:     cfg.Redis.Timeout,
+		PoolSize:    cfg.Redis.PoolSize,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	log.Printf("cache: redis at %s (db=%d, prefix=%q, default ttl=%s)",
+		cfg.Redis.Addr(), cfg.Redis.DB, cfg.Redis.Prefix, cfg.Redis.DefaultTTL)
+
+	return store, nil
 }
