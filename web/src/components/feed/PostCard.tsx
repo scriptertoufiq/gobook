@@ -1,19 +1,52 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
+import { deletePost } from '../../api/posts'
 import { useAuth } from '../../auth/context'
+import { toFormError } from '../../lib/errors'
 import { relativeTime } from '../../lib/time'
 import type { Post } from '../../types/api'
 import { Avatar } from '../Avatar'
-import { CommentIcon, DotsIcon, GlobeIcon, LikeIcon, ShareIcon } from '../icons'
+import { ConfirmDialog } from '../ConfirmDialog'
+import { CommentIcon, GlobeIcon, LikeIcon, ShareIcon } from '../icons'
+import { Alert } from '../ui'
+import { PostEditor } from './PostEditor'
+import { PostMenu } from './PostMenu'
 
-export function PostCard({ post }: { post: Post }) {
+export function PostCard({
+  post,
+  onUpdated,
+  onDeleted,
+}: {
+  post: Post
+  onUpdated: (post: Post) => void
+  onDeleted: (id: number) => void
+}) {
   const { user } = useAuth()
+  const [editing, setEditing] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  // The API returns user_id but no author record, so a name is only knowable
-  // for the signed-in reader's own posts. Everyone else is labelled by id
-  // until the backend embeds the author in PostResource.
+  // The API allows edits and deletes by the author alone.
   const isMine = user?.id === post.user_id
   const author = isMine ? user.name : `User #${post.user_id}`
+
+  async function remove() {
+    setDeleting(true)
+    setError(null)
+
+    try {
+      await deletePost(post.id)
+      setConfirming(false)
+      onDeleted(post.id)
+    } catch (err) {
+      setError(toFormError(err).message)
+      setConfirming(false)
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   return (
     <article className="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -46,46 +79,71 @@ export function PostCard({ post }: { post: Post }) {
           </p>
         </div>
 
-        <button
-          type="button"
-          aria-label="Post options"
-          className="rounded-full p-1.5 text-slate-500 transition hover:bg-slate-100 dark:hover:bg-slate-800"
-        >
-          <DotsIcon size={20} />
-        </button>
+        {isMine && !editing && (
+          <PostMenu onEdit={() => setEditing(true)} onDelete={() => setConfirming(true)} />
+        )}
       </header>
 
       <div className="px-3 pb-3">
-        <h2 className="mb-1 text-[17px] font-semibold">
-          {/* The title is the link to the post's own page. */}
-          <Link to={`/posts/${post.id}`} className="hover:underline">
-            {post.title}
-          </Link>
-        </h2>
-        {/* whitespace-pre-wrap so the line breaks the author typed survive */}
-        <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{post.content}</p>
+        {error && (
+          <div className="mb-3">
+            <Alert kind="error">{error}</Alert>
+          </div>
+        )}
 
-        <Link
-          to={`/posts/${post.id}`}
-          className="mt-2 inline-block text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
-        >
-          View post
-        </Link>
+        {editing ? (
+          <PostEditor
+            post={post}
+            onCancel={() => setEditing(false)}
+            onSaved={(updated) => {
+              onUpdated(updated)
+              setEditing(false)
+            }}
+          />
+        ) : (
+          <>
+            <h2 className="mb-1 text-[17px] font-semibold">
+              <Link to={`/posts/${post.id}`} className="hover:underline">
+                {post.title}
+              </Link>
+            </h2>
+            {/* whitespace-pre-wrap so the line breaks the author typed survive */}
+            <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{post.content}</p>
+
+            <Link
+              to={`/posts/${post.id}`}
+              className="mt-2 inline-block text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+            >
+              View post
+            </Link>
+          </>
+        )}
       </div>
 
-      <footer className="flex border-t border-slate-200 p-1 dark:border-slate-800">
-        <Action icon={<LikeIcon />} label="Like" />
-        <Link
-          to={`/posts/${post.id}`}
-          className="flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-sm
-            font-medium text-slate-600 transition hover:bg-slate-100
-            dark:text-slate-400 dark:hover:bg-slate-800"
-        >
-          <CommentIcon />
-          Comment
-        </Link>
-        <Action icon={<ShareIcon />} label="Share" />
-      </footer>
+      {!editing && (
+        <footer className="flex border-t border-slate-200 p-1 dark:border-slate-800">
+          <Action icon={<LikeIcon />} label="Like" />
+          <Link
+            to={`/posts/${post.id}`}
+            className="flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-sm
+              font-medium text-slate-600 transition hover:bg-slate-100
+              dark:text-slate-400 dark:hover:bg-slate-800"
+          >
+            <CommentIcon />
+            Comment
+          </Link>
+          <Action icon={<ShareIcon />} label="Share" />
+        </footer>
+      )}
+
+      <ConfirmDialog
+        open={confirming}
+        busy={deleting}
+        title="Delete this post?"
+        body={`"${post.title}" will be removed. This cannot be undone.`}
+        onConfirm={() => void remove()}
+        onCancel={() => setConfirming(false)}
+      />
     </article>
   )
 }

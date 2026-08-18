@@ -58,19 +58,13 @@ func TestPostCreatedStoresThePost(t *testing.T) {
 	}
 }
 
-// An edit drops the key rather than rewriting it, so the next read is
-// authoritative by construction and no concurrent write can be lost.
-func TestPostUpdatedRemovesTheCachedCopy(t *testing.T) {
+// An edit rewrites the entry in place: the post stays cached, carrying the new
+// version rather than the old one.
+func TestPostUpdatedReplacesTheCachedCopy(t *testing.T) {
 	d, store, _ := newListener(t)
 	ctx := context.Background()
 
 	d.Dispatch(ctx, appevents.PostCreated{Post: post(1, "Before")})
-
-	var cached models.Post
-	if found, _ := store.Get(ctx, cachekeys.Post(1), &cached); !found {
-		t.Fatal("precondition: the created post should be cached")
-	}
-
 	d.Dispatch(ctx, appevents.PostUpdated{Post: post(1, "After")})
 
 	var got models.Post
@@ -78,8 +72,26 @@ func TestPostUpdatedRemovesTheCachedCopy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if found {
-		t.Errorf("an edited post should have been evicted, but the cache still holds %q", got.Title)
+	if !found {
+		t.Fatal("an edited post must stay cached, not be evicted")
+	}
+	if got.Title != "After" {
+		t.Errorf("cache still holds the old version: %q", got.Title)
+	}
+}
+
+// The refreshed entry gets a full TTL rather than inheriting what was left of
+// the old one — otherwise an edit near expiry would be cached for moments.
+func TestUpdatedPostGetsAFreshTTL(t *testing.T) {
+	d, _, server := newListener(t)
+	ctx := context.Background()
+
+	d.Dispatch(ctx, appevents.PostCreated{Post: post(1, "Before")})
+	server.FastForward(4 * time.Minute)
+	d.Dispatch(ctx, appevents.PostUpdated{Post: post(1, "After")})
+
+	if ttl := server.TTL(cachekeys.Post(1)); ttl != 5*time.Minute {
+		t.Errorf("got ttl %v, want a full 5m after the update", ttl)
 	}
 }
 

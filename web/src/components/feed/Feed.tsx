@@ -94,6 +94,17 @@ export function Feed({ name }: { name: string }) {
     setPosts((current) => [post, ...current])
   }
 
+  // Edits and deletes are applied to the list in place rather than by
+  // refetching: a refetch would reset scroll position and re-request every page
+  // the reader has already loaded.
+  function replace(updated: Post) {
+    setPosts((current) => current.map((p) => (p.id === updated.id ? updated : p)))
+  }
+
+  function remove(id: number) {
+    setPosts((current) => current.filter((p) => p.id !== id))
+  }
+
   return (
     <div className="space-y-3">
       <Composer name={name} onCreated={prepend} />
@@ -117,7 +128,7 @@ export function Feed({ name }: { name: string }) {
       )}
 
       {posts.map((post) => (
-        <PostCard key={post.id} post={post} />
+        <PostCard key={post.id} post={post} onUpdated={replace} onDeleted={remove} />
       ))}
 
       {ready && posts.length === 0 && !error && (

@@ -16,21 +16,15 @@ import (
 
 // PostCacheListener keeps the post cache in step with the database.
 //
-// The policy differs by event, because the events differ in what can go wrong:
+// Writes go through the cache; deletes clear it:
 //
-//	created  write through — the post is cached immediately
-//	updated  invalidate    — the key is dropped, next read repopulates
-//	deleted  invalidate    — the key is dropped and stays gone
+//	created  write through — the new post is cached immediately
+//	updated  write through — the cached copy is replaced with the new version
+//	deleted  remove        — the key is dropped and stays gone
 //
-// Updates invalidate rather than overwrite because writing the new value back
-// races any concurrent update: two edits landing together can leave the cache
-// holding whichever reached Redis second, even though the database kept the
-// other. Dropping the key cannot be wrong — the next read is authoritative by
-// construction. The cost is one database query after each edit.
-//
-// Creates still write through: the row has only just come into existence, so
-// there is no other writer to race with, and it spares the first reader a
-// query for a post that was almost certainly created to be read.
+// Writing through on update means an edited post stays readable from cache: the
+// value stored is the one just persisted, so no reader pays for a query to
+// discover an edit that has already been made.
 type PostCacheListener struct {
 	cache cache.Cache
 	ttl   time.Duration
@@ -62,8 +56,8 @@ func (l *PostCacheListener) onCreated(ctx context.Context, event events.Event) e
 	return l.store(ctx, created.Post.ID, *created.Post)
 }
 
-// onUpdated drops the cached copy rather than replacing it. See the type's
-// doc comment for why an edit invalidates while a create writes through.
+// onUpdated replaces the cached copy with the version that was just saved, so
+// the next read is served the edit rather than having to go and find it.
 func (l *PostCacheListener) onUpdated(ctx context.Context, event events.Event) error {
 	updated, ok := event.(appevents.PostUpdated)
 	if !ok {
@@ -73,7 +67,7 @@ func (l *PostCacheListener) onUpdated(ctx context.Context, event events.Event) e
 		return fmt.Errorf("post-cache: PostUpdated carried no post")
 	}
 
-	return l.forget(ctx, updated.Post.ID)
+	return l.store(ctx, updated.Post.ID, *updated.Post)
 }
 
 func (l *PostCacheListener) onDeleted(ctx context.Context, event events.Event) error {
@@ -86,7 +80,7 @@ func (l *PostCacheListener) onDeleted(ctx context.Context, event events.Event) e
 }
 
 // forget removes a post's cached copy and clears the listings it appeared in.
-// Shared by the update and delete paths, which want exactly the same thing.
+// Only deletes need this — a delete is the one case with no new value to store.
 func (l *PostCacheListener) forget(ctx context.Context, id uint) error {
 	if err := l.cache.Delete(ctx, cachekeys.Post(id)); err != nil {
 		return fmt.Errorf("removing post %d from cache: %w", id, err)
@@ -96,8 +90,9 @@ func (l *PostCacheListener) forget(ctx context.Context, id uint) error {
 }
 
 // store writes the post through to the cache, then clears the listings — a new
-// post changes what a page of results contains, and those pages are keyed by
-// page number, search term and sort, so they cannot be updated individually.
+// or edited post changes what a page of results contains, and those pages are
+// keyed by page number, search term and sort, so they cannot be rewritten
+// individually the way a single post can.
 func (l *PostCacheListener) store(ctx context.Context, id uint, value any) error {
 	if err := l.cache.Set(ctx, cachekeys.Post(id), value, l.ttl); err != nil {
 		return fmt.Errorf("caching post %d: %w", id, err)
