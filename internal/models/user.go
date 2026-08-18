@@ -14,6 +14,8 @@ type User struct {
 	// EmailVerifiedAt is nil until the user follows the verification link.
 	// Nullable-timestamp-as-flag keeps *when* it happened, which a bool loses.
 	EmailVerifiedAt *time.Time `gorm:"index" json:"email_verified_at,omitempty"`
+
+	Timestamps
 }
 
 // TableName pins the table name so refactors of the Go type can't rename it.

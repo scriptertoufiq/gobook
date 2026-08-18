@@ -15,6 +15,8 @@ type RefreshToken struct {
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
 
 	User *User `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"-"`
+
+	Timestamps
 }
 
 func (RefreshToken) TableName() string { return "refresh_tokens" }

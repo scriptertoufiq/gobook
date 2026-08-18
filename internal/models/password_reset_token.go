@@ -15,6 +15,8 @@ type PasswordResetToken struct {
 	UsedAt    *time.Time `json:"used_at,omitempty"`
 
 	User *User `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"-"`
+
+	Timestamps
 }
 
 func (PasswordResetToken) TableName() string { return "password_reset_tokens" }

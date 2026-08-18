@@ -21,6 +21,8 @@ type Post struct {
 	// it (`Preload("User")`), and never serialised on its own — the API shapes
 	// output through internal/resources, not through the model.
 	User *User `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"-"`
+
+	Timestamps
 }
 
 // TableName pins the table name so refactors of the Go type can't rename it.

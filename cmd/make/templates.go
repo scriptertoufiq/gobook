@@ -7,11 +7,18 @@ const modelTemplate = `package models
 
 // {{.Pascal}} — TODO: replace these placeholder fields with the real schema,
 // then run: go run ./cmd/migrate
+//
+// Base first and Timestamps last is the house convention: a generated table's
+// column order follows field order, so this puts ~id~ at the front and the
+// created/updated/deleted bookkeeping at the back.
 type {{.Pascal}} struct {
 	Base
+
 	Name        string ~gorm:"size:120;not null;index" json:"name"~
 	Slug        string ~gorm:"size:140;not null;uniqueIndex" json:"slug"~
 	Description string ~gorm:"type:text" json:"description"~
+
+	Timestamps
 }
 
 func ({{.Pascal}}) TableName() string { return "{{.PluralSnake}}" }

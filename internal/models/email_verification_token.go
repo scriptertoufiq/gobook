@@ -12,6 +12,8 @@ type EmailVerificationToken struct {
 	UsedAt    *time.Time `json:"used_at,omitempty"`
 
 	User *User `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"-"`
+
+	Timestamps
 }
 
 func (EmailVerificationToken) TableName() string { return "email_verification_tokens" }
