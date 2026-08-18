@@ -39,13 +39,24 @@ type Cache interface {
 	Close() error
 }
 
+// Source says where a value came from. Handlers surface it so a caller can
+// tell a cached answer from a freshly computed one.
+type Source string
+
+const (
+	// FromCache — the value was already stored.
+	FromCache Source = "cache"
+	// FromOrigin — the cache missed and the value was computed, then stored.
+	FromOrigin Source = "database"
+)
+
+// IsHit reports whether the value was served from the cache.
+func (s Source) IsHit() bool { return s == FromCache }
+
 // Remember returns the cached value at key, computing and storing it on a miss.
 //
 // A free function rather than a method so it can be generic: the caller gets a
 // typed value back instead of passing a pointer and hoping the decode matched.
-//
-// A cache failure is never fatal here. If Redis is unreachable the value is
-// still computed and returned — a degraded cache must not degrade the API.
 func Remember[T any](
 	ctx context.Context,
 	c Cache,
@@ -53,22 +64,39 @@ func Remember[T any](
 	ttl time.Duration,
 	compute func() (T, error),
 ) (T, error) {
+	value, _, err := RememberFrom(ctx, c, key, ttl, compute)
+	return value, err
+}
+
+// RememberFrom is Remember, and additionally reports which path answered.
+//
+// A cache failure is never fatal here. If Redis is unreachable the value is
+// still computed and returned — a degraded cache must not degrade the API —
+// and the reported Source is FromOrigin, which is the truth: that answer did
+// come from the database.
+func RememberFrom[T any](
+	ctx context.Context,
+	c Cache,
+	key string,
+	ttl time.Duration,
+	compute func() (T, error),
+) (T, Source, error) {
 	var cached T
 
 	found, err := c.Get(ctx, key, &cached)
 	if err == nil && found {
-		return cached, nil
+		return cached, FromCache, nil
 	}
 
 	value, err := compute()
 	if err != nil {
-		return value, err
+		return value, FromOrigin, err
 	}
 
 	// Deliberately ignored: failing to cache is not failing to answer.
 	_ = c.Set(ctx, key, value, ttl)
 
-	return value, nil
+	return value, FromOrigin, nil
 }
 
 // Key joins parts into a namespaced cache key: Key("posts", "list", 2) is

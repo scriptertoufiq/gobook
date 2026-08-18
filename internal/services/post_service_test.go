@@ -107,19 +107,25 @@ func TestGetServesTheSecondReadFromCache(t *testing.T) {
 	ctx := context.Background()
 	post := seedPost(t, svc, 1, "Cached post")
 
-	first, err := svc.Get(ctx, post.ID)
+	first, firstSource, err := svc.Get(ctx, post.ID)
 	if err != nil {
 		t.Fatalf("first get: %v", err)
 	}
 	afterFirst := repo.findCalls
 
-	second, err := svc.Get(ctx, post.ID)
+	second, secondSource, err := svc.Get(ctx, post.ID)
 	if err != nil {
 		t.Fatalf("second get: %v", err)
 	}
 
 	if repo.findCalls != afterFirst {
 		t.Errorf("second read hit the database: findCalls went %d -> %d", afterFirst, repo.findCalls)
+	}
+	if firstSource != cache.FromOrigin {
+		t.Errorf("a cold read must report the database, got %q", firstSource)
+	}
+	if secondSource != cache.FromCache {
+		t.Errorf("a warm read must report the cache, got %q", secondSource)
 	}
 	if first.ID != second.ID || first.Title != second.Title || first.Content != second.Content {
 		t.Errorf("cached copy differs from the stored one:\n  %+v\n  %+v", first, second)
@@ -131,8 +137,8 @@ func TestCachedPostSurvivesRoundTripIntact(t *testing.T) {
 	ctx := context.Background()
 	post := seedPost(t, svc, 42, "Round trip")
 
-	_, _ = svc.Get(ctx, post.ID) // populate
-	got, err := svc.Get(ctx, post.ID)
+	_, _, _ = svc.Get(ctx, post.ID) // populate
+	got, _, err := svc.Get(ctx, post.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -154,7 +160,7 @@ func TestUpdateInvalidatesTheCachedCopy(t *testing.T) {
 	ctx := context.Background()
 	post := seedPost(t, svc, 1, "Before")
 
-	_, _ = svc.Get(ctx, post.ID) // populate the cache
+	_, _, _ = svc.Get(ctx, post.ID) // populate the cache
 
 	updated := "After the edit"
 	if _, err := svc.Update(ctx, post.ID, 1, requests.UpdatePostRequest{Title: &updated}); err != nil {
@@ -162,7 +168,7 @@ func TestUpdateInvalidatesTheCachedCopy(t *testing.T) {
 	}
 
 	before := repo.findCalls
-	got, err := svc.Get(ctx, post.ID)
+	got, _, err := svc.Get(ctx, post.ID)
 	if err != nil {
 		t.Fatalf("get after update: %v", err)
 	}
@@ -180,7 +186,7 @@ func TestDeleteInvalidatesSoThePostStopsBeingServed(t *testing.T) {
 	ctx := context.Background()
 	post := seedPost(t, svc, 1, "Doomed")
 
-	_, _ = svc.Get(ctx, post.ID) // populate
+	_, _, _ = svc.Get(ctx, post.ID) // populate
 
 	if err := svc.Delete(ctx, post.ID, 1); err != nil {
 		t.Fatalf("delete: %v", err)
@@ -188,7 +194,7 @@ func TestDeleteInvalidatesSoThePostStopsBeingServed(t *testing.T) {
 
 	// The most visible way a cache can be wrong: still answering for a row
 	// that no longer exists.
-	if _, err := svc.Get(ctx, post.ID); err == nil {
+	if _, _, err := svc.Get(ctx, post.ID); err == nil {
 		t.Fatal("a deleted post was still served from cache")
 	}
 }
@@ -197,12 +203,12 @@ func TestMissesAreNotCached(t *testing.T) {
 	svc, repo := newCachedPostService(t)
 	ctx := context.Background()
 
-	if _, err := svc.Get(ctx, 999); err == nil {
+	if _, _, err := svc.Get(ctx, 999); err == nil {
 		t.Fatal("expected a not-found error")
 	}
 	afterFirst := repo.findCalls
 
-	if _, err := svc.Get(ctx, 999); err == nil {
+	if _, _, err := svc.Get(ctx, 999); err == nil {
 		t.Fatal("expected a not-found error")
 	}
 
@@ -218,7 +224,7 @@ func TestUpdateIsComputedFromTheDatabaseNotTheCache(t *testing.T) {
 	ctx := context.Background()
 	post := seedPost(t, svc, 1, "Original")
 
-	_, _ = svc.Get(ctx, post.ID) // cache it
+	_, _, _ = svc.Get(ctx, post.ID) // cache it
 
 	// Something changes the row behind the service's back.
 	stored := repo.posts[post.ID]
@@ -240,7 +246,7 @@ func TestOwnershipIsEnforcedEvenOnACachedPost(t *testing.T) {
 	ctx := context.Background()
 	post := seedPost(t, svc, 1, "Owned by user 1")
 
-	_, _ = svc.Get(ctx, post.ID) // cache it
+	_, _, _ = svc.Get(ctx, post.ID) // cache it
 
 	title := "hijacked"
 	_, err := svc.Update(ctx, post.ID, 2, requests.UpdatePostRequest{Title: &title})
@@ -259,7 +265,7 @@ func TestServiceWorksWithCachingSwitchedOff(t *testing.T) {
 	post := seedPost(t, svc, 1, "Uncached")
 
 	for i := range 3 {
-		got, err := svc.Get(ctx, post.ID)
+		got, _, err := svc.Get(ctx, post.ID)
 		if err != nil {
 			t.Fatalf("get %d: %v", i, err)
 		}

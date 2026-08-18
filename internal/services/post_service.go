@@ -79,11 +79,13 @@ func (s *PostService) List(
 // cached, which makes a decoded `null` impossible — there is no nil for a
 // caller to dereference.
 //
-// Only successful lookups are cached. Remember returns early when compute
+// Only successful lookups are cached. RememberFrom returns early when compute
 // fails, so a 404 is never stored — otherwise a post created moments after
 // somebody probed for it would stay "missing" for the whole TTL.
-func (s *PostService) Get(ctx context.Context, id uint) (*models.Post, error) {
-	post, err := cache.Remember(ctx, s.cache, postCacheKey(id), s.ttl,
+// It also reports which path answered, so the handler can tell the caller
+// whether they were served from Redis or from MySQL.
+func (s *PostService) Get(ctx context.Context, id uint) (*models.Post, cache.Source, error) {
+	post, source, err := cache.RememberFrom(ctx, s.cache, postCacheKey(id), s.ttl,
 		func() (models.Post, error) {
 			found, err := s.fetch(ctx, id)
 			if err != nil {
@@ -92,10 +94,10 @@ func (s *PostService) Get(ctx context.Context, id uint) (*models.Post, error) {
 			return *found, nil
 		})
 	if err != nil {
-		return nil, err
+		return nil, source, err
 	}
 
-	return &post, nil
+	return &post, source, nil
 }
 
 // fetch reads a post straight from the database, bypassing the cache. It is

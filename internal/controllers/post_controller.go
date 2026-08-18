@@ -10,6 +10,7 @@ import (
 	"github.com/scriptertoufiq/go-mvc/internal/resources"
 	"github.com/scriptertoufiq/go-mvc/internal/services"
 	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
+	"github.com/scriptertoufiq/go-mvc/pkg/cache"
 	"github.com/scriptertoufiq/go-mvc/pkg/pagination"
 	"github.com/scriptertoufiq/go-mvc/pkg/response"
 )
@@ -50,6 +51,11 @@ func (ctrl *PostController) Index(c *gin.Context) {
 }
 
 // Show handles GET /api/v1/posts/:id
+//
+// The response says where the data came from, in two forms: an X-Cache header
+// for machines, and a message in the envelope for whoever is reading the JSON.
+// The header is the conventional signal — proxies and browser tools already
+// understand HIT/MISS — while the message is what shows up in a terminal.
 func (ctrl *PostController) Show(c *gin.Context) {
 	id, err := uintParam(c, "id")
 	if err != nil {
@@ -57,13 +63,32 @@ func (ctrl *PostController) Show(c *gin.Context) {
 		return
 	}
 
-	post, err := ctrl.service.Get(c.Request.Context(), id)
+	post, source, err := ctrl.service.Get(c.Request.Context(), id)
 	if err != nil {
+		// A miss that ends in an error was still answered by the database, but
+		// there is no data to label — the error envelope stands on its own.
 		response.Error(c, err)
 		return
 	}
 
-	response.OK(c, resources.NewPostResource(post))
+	c.Header("X-Cache", cacheHeader(source))
+	response.OKWithMessage(c, resources.NewPostResource(post), sourceMessage(source))
+}
+
+// cacheHeader renders the source as the conventional HIT/MISS token.
+func cacheHeader(source cache.Source) string {
+	if source.IsHit() {
+		return "HIT"
+	}
+	return "MISS"
+}
+
+// sourceMessage phrases the same fact for a human reading the body.
+func sourceMessage(source cache.Source) string {
+	if source.IsHit() {
+		return "Served from cache."
+	}
+	return "Served from database."
 }
 
 // Store handles POST /api/v1/posts

@@ -34,6 +34,13 @@ func Created(c *gin.Context, data any) {
 	c.JSON(http.StatusCreated, Envelope{Success: true, Data: data})
 }
 
+// OKWithMessage renders data alongside a human-readable note about how the
+// response was produced. OK stays the default — a message belongs here only
+// when it tells the caller something the data itself does not.
+func OKWithMessage(c *gin.Context, data any, msg string) {
+	c.JSON(http.StatusOK, Envelope{Success: true, Message: msg, Data: data})
+}
+
 func Message(c *gin.Context, msg string) {
 	c.JSON(http.StatusOK, Envelope{Success: true, Message: msg})
 }
