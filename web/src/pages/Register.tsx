@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from 'react'
-import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import * as authApi from '../api/auth'
 import { useAuth } from '../auth/context'
-import { Alert, Button, Card, Field } from '../components/ui'
+import { AuthLayout } from '../components/AuthLayout'
+import { Alert, PillButton, PillField } from '../components/ui'
 import { toFormError, type FormError } from '../lib/errors'
 
 export function Register() {
@@ -36,53 +37,54 @@ export function Register() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <Card className="w-full max-w-sm">
-        <h1 className="mb-6 text-xl font-semibold">Create an account</h1>
+    <AuthLayout
+      title="Create your account"
+      back="/login"
+      footer={
+        <PillButton variant="outline" type="button" onClick={() => navigate('/login')}>
+          I already have an account
+        </PillButton>
+      }
+    >
+      <form onSubmit={submit} className="space-y-3">
+        {error && <Alert kind="error">{error.message}</Alert>}
 
-        <form onSubmit={submit} className="space-y-4">
-          {error && <Alert kind="error">{error.message}</Alert>}
+        <PillField
+          placeholder="Full name"
+          value={name}
+          required
+          autoComplete="name"
+          error={error?.fields.name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <PillField
+          type="email"
+          placeholder="Email address"
+          value={email}
+          required
+          autoComplete="email"
+          error={error?.fields.email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <PillField
+          type="password"
+          placeholder="New password"
+          value={password}
+          required
+          minLength={8}
+          autoComplete="new-password"
+          error={error?.fields.password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
 
-          <Field
-            label="Name"
-            value={name}
-            required
-            autoComplete="name"
-            error={error?.fields.name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <Field
-            label="Email"
-            type="email"
-            value={email}
-            required
-            autoComplete="email"
-            error={error?.fields.email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <Field
-            label="Password"
-            type="password"
-            value={password}
-            required
-            minLength={8}
-            autoComplete="new-password"
-            error={error?.fields.password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-
-          <Button type="submit" disabled={busy} className="w-full">
-            {busy ? 'Creating…' : 'Create account'}
-          </Button>
-        </form>
-
-        <p className="mt-5 text-sm text-slate-500 dark:text-slate-400">
-          Already registered?{' '}
-          <Link to="/login" className="text-blue-600 hover:underline dark:text-blue-400">
-            Sign in
-          </Link>
+        <p className="px-1 pt-1 text-xs text-slate-500 dark:text-slate-400">
+          At least 8 characters.
         </p>
-      </Card>
-    </div>
+
+        <PillButton type="submit" disabled={busy} className="!mt-4">
+          {busy ? 'Creating account…' : 'Sign up'}
+        </PillButton>
+      </form>
+    </AuthLayout>
   )
 }

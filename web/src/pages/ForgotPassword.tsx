@@ -1,10 +1,13 @@
 import { useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import * as authApi from '../api/auth'
-import { Alert, Button, Card, Field } from '../components/ui'
+import { AuthLayout } from '../components/AuthLayout'
+import { Alert, PillButton, PillField } from '../components/ui'
 import { toFormError } from '../lib/errors'
 
 export function ForgotPassword() {
+  const navigate = useNavigate()
+
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -28,38 +31,39 @@ export function ForgotPassword() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <Card className="w-full max-w-sm">
-        <h1 className="mb-1 text-xl font-semibold">Reset your password</h1>
-        <p className="mb-6 text-sm text-slate-500 dark:text-slate-400">
-          We'll email you a link if the address has an account.
-        </p>
+    <AuthLayout
+      title="Find your account"
+      back="/login"
+      footer={
+        <PillButton variant="outline" type="button" onClick={() => navigate('/login')}>
+          Back to login
+        </PillButton>
+      }
+    >
+      {sent ? (
+        <Alert kind="success">{sent}</Alert>
+      ) : (
+        <form onSubmit={submit} className="space-y-3">
+          {error && <Alert kind="error">{error}</Alert>}
 
-        {sent ? (
-          <Alert kind="success">{sent}</Alert>
-        ) : (
-          <form onSubmit={submit} className="space-y-4">
-            {error && <Alert kind="error">{error}</Alert>}
-            <Field
-              label="Email"
-              type="email"
-              value={email}
-              required
-              autoComplete="email"
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <Button type="submit" disabled={busy} className="w-full">
-              {busy ? 'Sending…' : 'Send reset link'}
-            </Button>
-          </form>
-        )}
+          <p className="pb-1 text-sm text-slate-600 dark:text-slate-400">
+            Enter your email address and we'll send a reset link if it has an account.
+          </p>
 
-        <p className="mt-5 text-sm">
-          <Link to="/login" className="text-blue-600 hover:underline dark:text-blue-400">
-            Back to sign in
-          </Link>
-        </p>
-      </Card>
-    </div>
+          <PillField
+            type="email"
+            placeholder="Email address"
+            value={email}
+            required
+            autoComplete="email"
+            onChange={(e) => setEmail(e.target.value)}
+          />
+
+          <PillButton type="submit" disabled={busy} className="!mt-4">
+            {busy ? 'Sending…' : 'Send reset link'}
+          </PillButton>
+        </form>
+      )}
+    </AuthLayout>
   )
 }

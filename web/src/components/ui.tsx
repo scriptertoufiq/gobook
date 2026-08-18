@@ -80,3 +80,53 @@ export function Card({ children, className = '' }: { children: ReactNode; classN
     </div>
   )
 }
+
+/* ---------------------------------------------------------------------------
+ * Auth-screen variants.
+ *
+ * The signed-in app labels its inputs; the auth screens use placeholder-only
+ * pills, which reads cleaner on a short, self-evident form. Kept as separate
+ * components rather than props on Field/Button so neither style accumulates
+ * conditionals for the other's benefit.
+ * ------------------------------------------------------------------------ */
+
+export function PillField({
+  error,
+  ...props
+}: { error?: string } & InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <div>
+      <input
+        {...props}
+        aria-invalid={error ? true : undefined}
+        className={`w-full rounded-xl border bg-white px-4 py-3.5 text-[15px] outline-none transition
+          placeholder:text-slate-500
+          focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15
+          dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500
+          ${error ? 'border-red-400 dark:border-red-500' : 'border-slate-300 dark:border-slate-700'}`}
+      />
+      {error && <p className="mt-1.5 px-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
+    </div>
+  )
+}
+
+export function PillButton({
+  children,
+  variant = 'primary',
+  ...props
+}: { variant?: 'primary' | 'outline' } & ButtonHTMLAttributes<HTMLButtonElement>) {
+  const styles =
+    variant === 'primary'
+      ? 'bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-600/50'
+      : 'border border-blue-600 text-blue-600 hover:bg-blue-50 dark:border-blue-500 dark:text-blue-400 dark:hover:bg-blue-950/40'
+
+  return (
+    <button
+      {...props}
+      className={`w-full rounded-xl px-4 py-3.5 text-[15px] font-semibold transition
+        disabled:cursor-not-allowed ${styles} ${props.className ?? ''}`}
+    >
+      {children}
+    </button>
+  )
+}
