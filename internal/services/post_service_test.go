@@ -8,12 +8,15 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"gorm.io/gorm"
 
+	"github.com/scriptertoufiq/go-mvc/internal/cachekeys"
+	"github.com/scriptertoufiq/go-mvc/internal/listeners"
 	"github.com/scriptertoufiq/go-mvc/internal/models"
 	"github.com/scriptertoufiq/go-mvc/internal/repositories"
 	"github.com/scriptertoufiq/go-mvc/internal/requests"
 	"github.com/scriptertoufiq/go-mvc/internal/services"
 	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
 	"github.com/scriptertoufiq/go-mvc/pkg/cache"
+	"github.com/scriptertoufiq/go-mvc/pkg/events"
 	"github.com/scriptertoufiq/go-mvc/pkg/pagination"
 )
 
@@ -68,11 +71,21 @@ func (r *fakePostRepo) Paginate(_ context.Context, _ pagination.Params, _ uint) 
 	return out, int64(len(out)), nil
 }
 
+// activeRedis lets a test evict an entry to simulate expiry.
+var activeRedis *miniredis.Miniredis
+
+// evictPost removes a post's cached copy behind the service's back.
+func evictPost(t *testing.T, id uint) {
+	t.Helper()
+	activeRedis.Del("test:" + cachekeys.Post(id))
+}
+
 // newCachedPostService wires the service to an in-process Redis.
 func newCachedPostService(t *testing.T) (*services.PostService, *fakePostRepo) {
 	t.Helper()
 
 	server := miniredis.RunT(t)
+	activeRedis = server
 	store, err := cache.NewRedis(cache.Options{
 		Addr:        server.Addr(),
 		Prefix:      "test",
@@ -85,8 +98,12 @@ func newCachedPostService(t *testing.T) (*services.PostService, *fakePostRepo) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
+	// The real wiring: the service emits, the listener maintains the cache.
+	dispatcher := events.New()
+	listeners.NewPostCacheListener(store, 5*time.Minute).Register(dispatcher)
+
 	repo := newFakePostRepo()
-	return services.NewPostService(repo, store, 5*time.Minute), repo
+	return services.NewPostService(repo, store, dispatcher, 5*time.Minute), repo
 }
 
 func seedPost(t *testing.T, svc *services.PostService, author uint, title string) *models.Post {
@@ -102,10 +119,40 @@ func seedPost(t *testing.T, svc *services.PostService, author uint, title string
 	return post
 }
 
-func TestGetServesTheSecondReadFromCache(t *testing.T) {
+// Creating writes through, so the very first read of a new post is already a
+// cache hit and never reaches the database.
+func TestCreateWritesThePostStraightIntoTheCache(t *testing.T) {
 	svc, repo := newCachedPostService(t)
 	ctx := context.Background()
-	post := seedPost(t, svc, 1, "Cached post")
+	post := seedPost(t, svc, 1, "Cached on create")
+
+	before := repo.findCalls
+
+	got, source, err := svc.Get(ctx, post.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+
+	if source != cache.FromCache {
+		t.Errorf("the first read after a create should come from cache, got %q", source)
+	}
+	if repo.findCalls != before {
+		t.Errorf("the first read hit the database: findCalls went %d -> %d", before, repo.findCalls)
+	}
+	if got.Title != "Cached on create" || got.UserID != 1 {
+		t.Errorf("cached copy is wrong: %+v", got)
+	}
+}
+
+// A read of something the cache does not hold still falls through, stores the
+// result, and reports each path honestly.
+func TestUncachedPostIsFetchedThenServedFromCache(t *testing.T) {
+	svc, repo := newCachedPostService(t)
+	ctx := context.Background()
+	post := seedPost(t, svc, 1, "Evicted")
+
+	// Simulate the entry expiring or being evicted.
+	evictPost(t, post.ID)
 
 	first, firstSource, err := svc.Get(ctx, post.ID)
 	if err != nil {
@@ -118,14 +165,14 @@ func TestGetServesTheSecondReadFromCache(t *testing.T) {
 		t.Fatalf("second get: %v", err)
 	}
 
-	if repo.findCalls != afterFirst {
-		t.Errorf("second read hit the database: findCalls went %d -> %d", afterFirst, repo.findCalls)
-	}
 	if firstSource != cache.FromOrigin {
-		t.Errorf("a cold read must report the database, got %q", firstSource)
+		t.Errorf("a read with nothing cached must report the database, got %q", firstSource)
 	}
 	if secondSource != cache.FromCache {
-		t.Errorf("a warm read must report the cache, got %q", secondSource)
+		t.Errorf("the read after that must report the cache, got %q", secondSource)
+	}
+	if repo.findCalls != afterFirst {
+		t.Errorf("second read hit the database: findCalls went %d -> %d", afterFirst, repo.findCalls)
 	}
 	if first.ID != second.ID || first.Title != second.Title || first.Content != second.Content {
 		t.Errorf("cached copy differs from the stored one:\n  %+v\n  %+v", first, second)
@@ -155,12 +202,14 @@ func TestCachedPostSurvivesRoundTripIntact(t *testing.T) {
 	}
 }
 
-func TestUpdateInvalidatesTheCachedCopy(t *testing.T) {
+// Updating writes the new version through, so the next read is a hit carrying
+// the edit — never the pre-edit copy.
+func TestUpdateWritesTheNewVersionIntoTheCache(t *testing.T) {
 	svc, repo := newCachedPostService(t)
 	ctx := context.Background()
 	post := seedPost(t, svc, 1, "Before")
 
-	_, _, _ = svc.Get(ctx, post.ID) // populate the cache
+	_, _, _ = svc.Get(ctx, post.ID) // make sure something is cached
 
 	updated := "After the edit"
 	if _, err := svc.Update(ctx, post.ID, 1, requests.UpdatePostRequest{Title: &updated}); err != nil {
@@ -168,7 +217,7 @@ func TestUpdateInvalidatesTheCachedCopy(t *testing.T) {
 	}
 
 	before := repo.findCalls
-	got, _, err := svc.Get(ctx, post.ID)
+	got, source, err := svc.Get(ctx, post.ID)
 	if err != nil {
 		t.Fatalf("get after update: %v", err)
 	}
@@ -176,8 +225,11 @@ func TestUpdateInvalidatesTheCachedCopy(t *testing.T) {
 	if got.Title != updated {
 		t.Errorf("served a stale title after an edit: got %q, want %q", got.Title, updated)
 	}
-	if repo.findCalls == before {
-		t.Error("expected the read to fall through to the database after invalidation")
+	if source != cache.FromCache {
+		t.Errorf("the read after an update should be served from cache, got %q", source)
+	}
+	if repo.findCalls != before {
+		t.Errorf("the read should not have needed the database: findCalls went %d -> %d", before, repo.findCalls)
 	}
 }
 
@@ -259,7 +311,7 @@ func TestOwnershipIsEnforcedEvenOnACachedPost(t *testing.T) {
 
 func TestServiceWorksWithCachingSwitchedOff(t *testing.T) {
 	repo := newFakePostRepo()
-	svc := services.NewPostService(repo, cache.NewNull(), 5*time.Minute)
+	svc := services.NewPostService(repo, cache.NewNull(), events.New(), 5*time.Minute)
 	ctx := context.Background()
 
 	post := seedPost(t, svc, 1, "Uncached")

@@ -14,9 +14,11 @@ import (
 
 	"github.com/scriptertoufiq/go-mvc/config"
 	"github.com/scriptertoufiq/go-mvc/internal/controllers"
+	"github.com/scriptertoufiq/go-mvc/internal/listeners"
 	"github.com/scriptertoufiq/go-mvc/internal/repositories"
 	"github.com/scriptertoufiq/go-mvc/internal/services"
 	"github.com/scriptertoufiq/go-mvc/pkg/cache"
+	"github.com/scriptertoufiq/go-mvc/pkg/events"
 	"github.com/scriptertoufiq/go-mvc/pkg/jwt"
 	"github.com/scriptertoufiq/go-mvc/pkg/mailer"
 	"github.com/scriptertoufiq/go-mvc/pkg/ratelimit"
@@ -39,6 +41,10 @@ type Container struct {
 	// Cache is never nil — cache.Null stands in when REDIS_ENABLED=false, so
 	// callers need no branch for the disabled case.
 	Cache cache.Cache
+
+	// Events is the in-process bus. Exposed so a future CLI command or worker
+	// can dispatch and subscribe through the same wiring the HTTP app uses.
+	Events *events.Dispatcher
 
 	// Throttles. Nil when RATE_LIMIT_ENABLED=false, which the middleware
 	// treats as a pass-through.
@@ -85,6 +91,12 @@ func Build(db *gorm.DB, cfg *config.Config) (*Container, error) {
 		return nil, err
 	}
 
+	// The event bus, and everything subscribed to it. Registering here — rather
+	// than inside a service — is what keeps "who reacts to what" answerable
+	// from one file.
+	dispatcher := events.New()
+	listeners.NewPostCacheListener(cacheStore, cfg.Redis.DefaultTTL).Register(dispatcher)
+
 	var apiLimiter, authLimiter *ratelimit.Limiter
 	if cfg.RateLimit.Enabled {
 		apiLimiter = ratelimit.New(cfg.RateLimit.Requests, cfg.RateLimit.Window)
@@ -127,7 +139,7 @@ func Build(db *gorm.DB, cfg *config.Config) (*Container, error) {
 	// callback rather than a constructor argument.
 	userService.OnEmailNeedsVerification(authService.HandleEmailNeedsVerification)
 
-	postService := services.NewPostService(postRepo, cacheStore, cfg.Redis.DefaultTTL)
+	postService := services.NewPostService(postRepo, cacheStore, dispatcher, cfg.Redis.DefaultTTL)
 	// codegen:services
 
 	// Background jobs
@@ -145,6 +157,7 @@ func Build(db *gorm.DB, cfg *config.Config) (*Container, error) {
 		JWT:                      jwtManager,
 		RequireEmailVerification: cfg.Auth.RequireEmailVerification,
 		Cache:                    cacheStore,
+		Events:                   dispatcher,
 		APIRateLimiter:           apiLimiter,
 		AuthRateLimiter:          authLimiter,
 		stopBackground:           stopBackground,

@@ -3,17 +3,19 @@ package services
 import (
 	"context"
 	"errors"
-	"log"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
 
+	"github.com/scriptertoufiq/go-mvc/internal/cachekeys"
+	appevents "github.com/scriptertoufiq/go-mvc/internal/events"
 	"github.com/scriptertoufiq/go-mvc/internal/models"
 	"github.com/scriptertoufiq/go-mvc/internal/repositories"
 	"github.com/scriptertoufiq/go-mvc/internal/requests"
 	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
 	"github.com/scriptertoufiq/go-mvc/pkg/cache"
+	"github.com/scriptertoufiq/go-mvc/pkg/events"
 	"github.com/scriptertoufiq/go-mvc/pkg/pagination"
 )
 
@@ -32,31 +34,19 @@ func ownedBy(post *models.Post, callerID uint) bool {
 }
 
 type PostService struct {
-	repo  repositories.PostRepository
-	cache cache.Cache
-	ttl   time.Duration
+	repo   repositories.PostRepository
+	cache  cache.Cache
+	events *events.Dispatcher
+	ttl    time.Duration
 }
 
-func NewPostService(repo repositories.PostRepository, store cache.Cache, ttl time.Duration) *PostService {
-	return &PostService{repo: repo, cache: store, ttl: ttl}
-}
-
-// postCacheKey is the single place the key format lives, so the read that
-// populates it and the writes that clear it can never drift apart.
-func postCacheKey(id uint) string {
-	return cache.Key("posts", "show", id)
-}
-
-// forget drops a post's cached copy.
-//
-// Called after a write succeeds. A failure here is logged rather than
-// returned: the write is already durable, so reporting an error would invite
-// the client to retry an operation that worked. The cost is a stale read
-// bounded by the TTL, which is why the default is short.
-func (s *PostService) forget(ctx context.Context, id uint) {
-	if err := s.cache.Delete(ctx, postCacheKey(id)); err != nil {
-		log.Printf("cache: could not invalidate post %d, reads may be stale until it expires: %v", id, err)
-	}
+func NewPostService(
+	repo repositories.PostRepository,
+	store cache.Cache,
+	dispatcher *events.Dispatcher,
+	ttl time.Duration,
+) *PostService {
+	return &PostService{repo: repo, cache: store, events: dispatcher, ttl: ttl}
 }
 
 // List returns a page of posts, optionally narrowed to a single author.
@@ -85,7 +75,7 @@ func (s *PostService) List(
 // It also reports which path answered, so the handler can tell the caller
 // whether they were served from Redis or from MySQL.
 func (s *PostService) Get(ctx context.Context, id uint) (*models.Post, cache.Source, error) {
-	post, source, err := cache.RememberFrom(ctx, s.cache, postCacheKey(id), s.ttl,
+	post, source, err := cache.RememberFrom(ctx, s.cache, cachekeys.Post(id), s.ttl,
 		func() (models.Post, error) {
 			found, err := s.fetch(ctx, id)
 			if err != nil {
@@ -130,6 +120,11 @@ func (s *PostService) Create(
 	if err := s.repo.Create(ctx, post); err != nil {
 		return nil, apperror.Internal(err)
 	}
+
+	// What happens next — caching it, clearing listings, anything added later —
+	// is the listeners' business, not this method's.
+	s.events.Dispatch(ctx, appevents.PostCreated{Post: post})
+
 	return post, nil
 }
 
@@ -162,10 +157,7 @@ func (s *PostService) Update(
 		return nil, apperror.Internal(err)
 	}
 
-	// Invalidate rather than overwrite. Writing the new value back would race
-	// with any concurrent update, and could leave the cache holding a version
-	// the database never had; dropping the key makes the next read authoritative.
-	s.forget(ctx, id)
+	s.events.Dispatch(ctx, appevents.PostUpdated{Post: post})
 
 	return post, nil
 }
@@ -185,9 +177,7 @@ func (s *PostService) Delete(ctx context.Context, id uint, callerID uint) error 
 		return apperror.Internal(err)
 	}
 
-	// Without this a deleted post keeps being served until its TTL runs out,
-	// which is the most visible way a cache can be wrong.
-	s.forget(ctx, id)
+	s.events.Dispatch(ctx, appevents.PostDeleted{PostID: id, AuthorID: post.UserID})
 
 	return nil
 }
