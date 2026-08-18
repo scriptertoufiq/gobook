@@ -58,19 +58,28 @@ func TestPostCreatedStoresThePost(t *testing.T) {
 	}
 }
 
-func TestPostUpdatedReplacesTheCachedCopy(t *testing.T) {
+// An edit drops the key rather than rewriting it, so the next read is
+// authoritative by construction and no concurrent write can be lost.
+func TestPostUpdatedRemovesTheCachedCopy(t *testing.T) {
 	d, store, _ := newListener(t)
 	ctx := context.Background()
 
 	d.Dispatch(ctx, appevents.PostCreated{Post: post(1, "Before")})
+
+	var cached models.Post
+	if found, _ := store.Get(ctx, cachekeys.Post(1), &cached); !found {
+		t.Fatal("precondition: the created post should be cached")
+	}
+
 	d.Dispatch(ctx, appevents.PostUpdated{Post: post(1, "After")})
 
 	var got models.Post
-	if _, err := store.Get(ctx, cachekeys.Post(1), &got); err != nil {
+	found, err := store.Get(ctx, cachekeys.Post(1), &got)
+	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.Title != "After" {
-		t.Errorf("cache still holds the old version: %q", got.Title)
+	if found {
+		t.Errorf("an edited post should have been evicted, but the cache still holds %q", got.Title)
 	}
 }
 

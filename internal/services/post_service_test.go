@@ -202,9 +202,9 @@ func TestCachedPostSurvivesRoundTripIntact(t *testing.T) {
 	}
 }
 
-// Updating writes the new version through, so the next read is a hit carrying
-// the edit — never the pre-edit copy.
-func TestUpdateWritesTheNewVersionIntoTheCache(t *testing.T) {
+// Updating evicts, so the next read goes to the database and comes back with
+// the edit. The stale copy must never be served.
+func TestUpdateInvalidatesSoTheNextReadIsFresh(t *testing.T) {
 	svc, repo := newCachedPostService(t)
 	ctx := context.Background()
 	post := seedPost(t, svc, 1, "Before")
@@ -225,11 +225,20 @@ func TestUpdateWritesTheNewVersionIntoTheCache(t *testing.T) {
 	if got.Title != updated {
 		t.Errorf("served a stale title after an edit: got %q, want %q", got.Title, updated)
 	}
-	if source != cache.FromCache {
-		t.Errorf("the read after an update should be served from cache, got %q", source)
+	if source != cache.FromOrigin {
+		t.Errorf("the read after an edit should come from the database, got %q", source)
 	}
-	if repo.findCalls != before {
-		t.Errorf("the read should not have needed the database: findCalls went %d -> %d", before, repo.findCalls)
+	if repo.findCalls == before {
+		t.Error("expected the read to fall through to the database after invalidation")
+	}
+
+	// ...and it repopulates, so only the first read after an edit pays.
+	_, second, err := svc.Get(ctx, post.ID)
+	if err != nil {
+		t.Fatalf("second get: %v", err)
+	}
+	if second != cache.FromCache {
+		t.Errorf("the read after that should be cached again, got %q", second)
 	}
 }
 
