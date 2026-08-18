@@ -5,6 +5,7 @@ import { useAuth } from '../auth/context'
 import { Avatar } from '../components/Avatar'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { PostEditor } from '../components/feed/PostEditor'
+import { ReactionButton, ReactionSummary } from '../components/feed/ReactionBar'
 import { GlobeIcon } from '../components/icons'
 import { Alert, Badge, Button, Card } from '../components/ui'
 import { ApiError } from '../api/client'
@@ -193,6 +194,15 @@ export function PostDetail() {
 
             {/* whitespace-pre-wrap so the author's own line breaks survive */}
             <div className="mt-3 text-[15px] leading-relaxed whitespace-pre-wrap">{post.content}</div>
+
+            <div className="mt-6 border-t border-slate-200 pt-3 dark:border-slate-800">
+              <div className="mb-1 px-1 text-xs text-slate-500 dark:text-slate-400">
+                <ReactionSummary postID={post.id} />
+              </div>
+              <div className="flex">
+                <ReactionButton postID={post.id} />
+              </div>
+            </div>
 
             {isMine && (
               <div className="mt-5 flex gap-2">

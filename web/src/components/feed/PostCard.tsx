@@ -8,10 +8,11 @@ import { relativeTime } from '../../lib/time'
 import type { Post } from '../../types/api'
 import { Avatar } from '../Avatar'
 import { ConfirmDialog } from '../ConfirmDialog'
-import { CommentIcon, GlobeIcon, LikeIcon, ShareIcon } from '../icons'
+import { CommentIcon, GlobeIcon, ShareIcon } from '../icons'
 import { Alert } from '../ui'
 import { PostEditor } from './PostEditor'
 import { PostMenu } from './PostMenu'
+import { ReactionButton, ReactionSummary } from './ReactionBar'
 
 export function PostCard({
   post,
@@ -121,19 +122,25 @@ export function PostCard({
       </div>
 
       {!editing && (
-        <footer className="flex border-t border-slate-200 p-1 dark:border-slate-800">
-          <Action icon={<LikeIcon />} label="Like" />
-          <Link
-            to={`/posts/${post.id}`}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-sm
-              font-medium text-slate-600 transition hover:bg-slate-100
-              dark:text-slate-400 dark:hover:bg-slate-800"
-          >
-            <CommentIcon />
-            Comment
-          </Link>
-          <Action icon={<ShareIcon />} label="Share" />
-        </footer>
+        <>
+          <div className="flex items-center justify-between px-3 pb-2 text-xs text-slate-500 dark:text-slate-400">
+            <ReactionSummary postID={post.id} />
+          </div>
+
+          <footer className="flex border-t border-slate-200 p-1 dark:border-slate-800">
+            <ReactionButton postID={post.id} />
+            <Link
+              to={`/posts/${post.id}`}
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-sm
+                font-medium text-slate-600 transition hover:bg-slate-100
+                dark:text-slate-400 dark:hover:bg-slate-800"
+            >
+              <CommentIcon />
+              Comment
+            </Link>
+            <Action icon={<ShareIcon />} label="Share" />
+          </footer>
+        </>
       )}
 
       <ConfirmDialog
