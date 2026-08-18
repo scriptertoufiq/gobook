@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+
 import { useAuth } from '../../auth/context'
 import { relativeTime } from '../../lib/time'
 import type { Post } from '../../types/api'
@@ -28,9 +30,11 @@ export function PostCard({ post }: { post: Post }) {
             )}
           </p>
           <p className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-            <time dateTime={post.created_at} title={new Date(post.created_at).toLocaleString()}>
-              {relativeTime(post.created_at)}
-            </time>
+            <Link to={`/posts/${post.id}`} className="hover:underline">
+              <time dateTime={post.created_at} title={new Date(post.created_at).toLocaleString()}>
+                {relativeTime(post.created_at)}
+              </time>
+            </Link>
             {post.updated_at !== post.created_at && (
               <>
                 <span aria-hidden="true">·</span>
@@ -52,14 +56,34 @@ export function PostCard({ post }: { post: Post }) {
       </header>
 
       <div className="px-3 pb-3">
-        <h2 className="mb-1 text-[17px] font-semibold">{post.title}</h2>
+        <h2 className="mb-1 text-[17px] font-semibold">
+          {/* The title is the link to the post's own page. */}
+          <Link to={`/posts/${post.id}`} className="hover:underline">
+            {post.title}
+          </Link>
+        </h2>
         {/* whitespace-pre-wrap so the line breaks the author typed survive */}
         <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{post.content}</p>
+
+        <Link
+          to={`/posts/${post.id}`}
+          className="mt-2 inline-block text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+        >
+          View post
+        </Link>
       </div>
 
       <footer className="flex border-t border-slate-200 p-1 dark:border-slate-800">
         <Action icon={<LikeIcon />} label="Like" />
-        <Action icon={<CommentIcon />} label="Comment" />
+        <Link
+          to={`/posts/${post.id}`}
+          className="flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-sm
+            font-medium text-slate-600 transition hover:bg-slate-100
+            dark:text-slate-400 dark:hover:bg-slate-800"
+        >
+          <CommentIcon />
+          Comment
+        </Link>
         <Action icon={<ShareIcon />} label="Share" />
       </footer>
     </article>

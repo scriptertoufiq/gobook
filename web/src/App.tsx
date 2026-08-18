@@ -5,6 +5,7 @@ import { Layout, PageBody } from './components/Layout'
 import { ForgotPassword } from './pages/ForgotPassword'
 import { Home } from './pages/Home'
 import { Login } from './pages/Login'
+import { PostDetail } from './pages/PostDetail'
 import { Profile } from './pages/Profile'
 import { Register } from './pages/Register'
 import { ResetPassword } from './pages/ResetPassword'
@@ -27,6 +28,16 @@ export default function App() {
             <Route element={<Layout />}>
               {/* The feed is what a signed-in user lands on. */}
               <Route index element={<Home />} />
+
+              {/* A post on its own URL — linkable, bookmarkable, reloadable. */}
+              <Route
+                path="/posts/:id"
+                element={
+                  <PageBody>
+                    <PostDetail />
+                  </PageBody>
+                }
+              />
 
               <Route
                 path="/account"

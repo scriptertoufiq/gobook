@@ -1,5 +1,5 @@
 import type { Envelope, ListParams, Post } from '../types/api'
-import { request, requestData } from './client'
+import { ApiError, request, requestData } from './client'
 
 const base = '/api/v1/posts'
 
@@ -28,8 +28,23 @@ export async function createPost(title: string, content: string): Promise<Post> 
   return requestData<Post>(base, { method: 'POST', body: { title, content } })
 }
 
-export async function getPost(id: number): Promise<Post> {
-  return requestData<Post>(`${base}/${id}`)
+/** What a single-post read returned, and where the API served it from. */
+export interface PostWithSource {
+  post: Post
+  /** The API's own words — "Served from cache." / "Served from database." */
+  servedFrom: string | null
+}
+
+/**
+ * Reads one post. Unlike the other calls this keeps the envelope's `message`,
+ * because GET /posts/:id is cached server-side and reports which path answered.
+ */
+export async function getPost(id: number): Promise<PostWithSource> {
+  const envelope = await request<Post>(`${base}/${id}`)
+  if (!envelope.data) {
+    throw new ApiError(200, { code: 'empty_response', message: 'The server returned no post.' })
+  }
+  return { post: envelope.data, servedFrom: envelope.message ?? null }
 }
 
 export async function updatePost(
