@@ -42,6 +42,16 @@ export interface User {
   updated_at: string
 }
 
+/** Mirrors internal/resources.PostResource. */
+export interface Post {
+  id: number
+  user_id: number
+  title: string
+  content: string
+  created_at: string
+  updated_at: string
+}
+
 export interface TokenPair {
   access_token: string
   refresh_token: string
@@ -57,4 +67,6 @@ export interface ListParams {
   search?: string
   sort_by?: string
   sort_dir?: 'asc' | 'desc'
+  /** Posts only: narrow the listing to one author. */
+  user_id?: number
 }

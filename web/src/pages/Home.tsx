@@ -1,18 +1,16 @@
 import { useAuth } from '../auth/context'
-import { Composer } from '../components/feed/Composer'
+import { Feed } from '../components/feed/Feed'
 import { LeftRail } from '../components/feed/LeftRail'
-import { PostCard } from '../components/feed/PostCard'
 import { RightRail } from '../components/feed/RightRail'
 import { PencilIcon } from '../components/icons'
-import { posts } from '../data/feed'
 
 /**
  * The landing page after login.
  *
- * Content is static — see src/data/feed.ts, the single module to replace when
- * this goes live. The layout is three independently scrolling columns: the
- * rails are `sticky` under the header so only the feed moves, which is what
- * keeps navigation reachable on a long timeline.
+ * The feed is live against /api/v1/posts; the rails are still placeholder
+ * content from src/data/feed.ts. The layout is three independently scrolling
+ * columns, with the rails `sticky` under the header so only the feed moves —
+ * which is what keeps navigation reachable on a long timeline.
  */
 export function Home() {
   const { user } = useAuth()
@@ -26,15 +24,8 @@ export function Home() {
       </div>
 
       {/* Feed */}
-      <main className="w-full max-w-xl min-w-0 space-y-3">
-        <Composer name={name} />
-        {posts.map((post) => (
-          <PostCard key={post.id} post={post} />
-        ))}
-
-        <p className="py-6 text-center text-sm text-slate-500 dark:text-slate-500">
-          You&rsquo;re all caught up.
-        </p>
+      <main className="w-full max-w-xl min-w-0">
+        <Feed name={name} />
       </main>
 
       {/* Right rail */}
