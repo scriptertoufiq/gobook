@@ -3,6 +3,7 @@ package cache_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -267,5 +268,77 @@ func TestNullCacheAlwaysMissesAndNeverErrors(t *testing.T) {
 func TestKeyJoinsPartsWithColons(t *testing.T) {
 	if got := cache.Key("posts", "list", 2); got != "posts:list:2" {
 		t.Errorf("got %q, want posts:list:2", got)
+	}
+}
+
+func TestBumpStartsAtOneAndClimbs(t *testing.T) {
+	store, _ := newRedis(t, "gen")
+	ctx := context.Background()
+
+	first, err := store.Bump(ctx, "posts:list:gen")
+	if err != nil {
+		t.Fatalf("bump: %v", err)
+	}
+	if first != 1 {
+		t.Errorf("a counter that did not exist should start at 1, got %d", first)
+	}
+
+	second, _ := store.Bump(ctx, "posts:list:gen")
+	if second != 2 {
+		t.Errorf("got %d, want 2", second)
+	}
+}
+
+func TestGenerationOfAnUntouchedCounterIsZero(t *testing.T) {
+	store, _ := newRedis(t, "gen")
+	ctx := context.Background()
+
+	// Nothing has invalidated anything yet — that is an answer, not a fault.
+	n, err := store.Generation(ctx, "posts:list:gen")
+	if err != nil {
+		t.Fatalf("generation: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("got %d, want 0", n)
+	}
+}
+
+func TestGenerationReadsWhatBumpWrote(t *testing.T) {
+	store, _ := newRedis(t, "gen")
+	ctx := context.Background()
+
+	for range 3 {
+		if _, err := store.Bump(ctx, "posts:list:gen"); err != nil {
+			t.Fatalf("bump: %v", err)
+		}
+	}
+
+	n, err := store.Generation(ctx, "posts:list:gen")
+	if err != nil {
+		t.Fatalf("generation: %v", err)
+	}
+	if n != 3 {
+		t.Errorf("got %d, want 3", n)
+	}
+}
+
+// Invalidation must not get slower as the cache fills — the whole reason this
+// replaced a prefix scan.
+func TestBumpCostDoesNotGrowWithTheKeyspace(t *testing.T) {
+	store, server := newRedis(t, "gen")
+	ctx := context.Background()
+
+	for i := range 5000 {
+		if err := server.Set(fmt.Sprintf("unrelated:%d", i), "x"); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	// A scan would visit all 5000; this touches exactly one key.
+	if _, err := store.Bump(ctx, "posts:list:gen"); err != nil {
+		t.Fatalf("bump: %v", err)
+	}
+	if n, _ := store.Generation(ctx, "posts:list:gen"); n != 1 {
+		t.Errorf("got %d, want 1", n)
 	}
 }

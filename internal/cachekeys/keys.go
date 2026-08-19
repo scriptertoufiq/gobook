@@ -56,6 +56,16 @@ func ReactionFlushingPrefix() string {
 	return cache.Key("reactions", "flushing")
 }
 
+// PostListGeneration counts how many times the post listings have been
+// invalidated.
+//
+// Cached listing pages embed its current value, so a write bumps this one
+// counter and every page cached under the old number is orphaned at once —
+// no scan, and the same cost whether the cache holds ten keys or ten million.
+func PostListGeneration() string {
+	return cache.Key("posts", "list", "gen")
+}
+
 // PostListPrefix covers every cached page of the post listing. Listings are
 // keyed by page, search and sort, so they are cleared as a family rather than
 // individually — see cache.DeleteByPrefix.

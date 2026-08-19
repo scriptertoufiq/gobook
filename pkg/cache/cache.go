@@ -27,10 +27,27 @@ type Cache interface {
 	// Delete removes keys. Absent keys are not an error.
 	Delete(ctx context.Context, keys ...string) error
 
-	// DeleteByPrefix removes every key beginning with prefix. This is how a
-	// write invalidates a family of cached reads — a new post has to clear
-	// every cached page of the listing, whose keys are not individually known.
+	// DeleteByPrefix removes every key beginning with prefix.
+	//
+	// NEVER call this on a request path. It scans the whole keyspace — the
+	// server filters, so the cost is the total number of keys whether or not
+	// any of them match. Measured here, running it per post creation took
+	// throughput from 828 to 15 requests a second as unrelated keys
+	// accumulated. To invalidate a family of cached reads, bump a generation
+	// instead. This stays for administrative one-offs.
 	DeleteByPrefix(ctx context.Context, prefix string) error
+
+	// Bump increments a counter and returns its new value, creating it at 1.
+	//
+	// The cheap way to invalidate a whole family of entries: cached keys embed
+	// the current generation, so raising it orphans every one of them at once
+	// and they expire on their own. One command, no scan, cost independent of
+	// how large the cache has grown.
+	Bump(ctx context.Context, key string) (int64, error)
+
+	// Generation reads a counter without changing it. A missing counter is 0,
+	// not an error — nothing has invalidated anything yet.
+	Generation(ctx context.Context, key string) (int64, error)
 
 	// Ping verifies the backend is reachable.
 	Ping(ctx context.Context) error

@@ -20,6 +20,8 @@ func (Null) Get(context.Context, string, any) (bool, error)        { return fals
 func (Null) Set(context.Context, string, any, time.Duration) error { return nil }
 func (Null) Delete(context.Context, ...string) error               { return nil }
 func (Null) DeleteByPrefix(context.Context, string) error          { return nil }
+func (Null) Bump(context.Context, string) (int64, error)           { return 0, nil }
+func (Null) Generation(context.Context, string) (int64, error)     { return 0, nil }
 func (Null) Ping(context.Context) error                            { return nil }
 func (Null) Close() error                                          { return nil }
 

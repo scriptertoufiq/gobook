@@ -127,10 +127,10 @@ func (r *Redis) Delete(ctx context.Context, keys ...string) error {
 
 // DeleteByPrefix removes every key under a prefix.
 //
-// SCAN rather than KEYS, deliberately: KEYS walks the entire keyspace in one
-// blocking call, which on a busy server stalls every other client. SCAN is
-// cursor-based and yields between batches, so this stays safe to call from a
-// request path.
+// SCAN rather than KEYS, because KEYS walks the keyspace in one blocking call
+// and stalls every other client. SCAN yields between batches — but it still
+// visits every key in the database, so this is O(keyspace) no matter how few
+// match. Keep it off request paths; see the interface for what to use instead.
 func (r *Redis) DeleteByPrefix(ctx context.Context, prefix string) error {
 	pattern := r.key(prefix) + "*"
 
@@ -152,6 +152,25 @@ func (r *Redis) DeleteByPrefix(ctx context.Context, prefix string) error {
 			return nil
 		}
 	}
+}
+
+func (r *Redis) Bump(ctx context.Context, key string) (int64, error) {
+	n, err := r.client.Incr(ctx, r.key(key)).Result()
+	if err != nil {
+		return 0, fmt.Errorf("cache: bump %s: %w", key, err)
+	}
+	return n, nil
+}
+
+func (r *Redis) Generation(ctx context.Context, key string) (int64, error) {
+	n, err := r.client.Get(ctx, r.key(key)).Int64()
+	switch {
+	case errors.Is(err, redis.Nil):
+		return 0, nil
+	case err != nil:
+		return 0, fmt.Errorf("cache: read generation %s: %w", key, err)
+	}
+	return n, nil
 }
 
 func (r *Redis) Ping(ctx context.Context) error {
