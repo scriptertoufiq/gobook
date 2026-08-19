@@ -135,6 +135,12 @@ func (f *Flusher) write(ctx context.Context, batch Batch) error {
 		return err
 	}
 
+	// The removal markers have served their purpose now that the deletions are
+	// durable. Dropping them is what keeps Redis holding only real reactions.
+	if err := f.store.ClearRemoved(ctx, batch.Deletes); err != nil {
+		log.Printf("reactions: %v", err)
+	}
+
 	return f.store.Release(ctx, batch.RunID)
 }
 

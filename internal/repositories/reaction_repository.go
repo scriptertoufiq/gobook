@@ -45,9 +45,26 @@ type ReactionRepository interface {
 	// action older than the stored row must not replace it.
 	TypeForUser(ctx context.Context, postID, userID uint) (string, time.Time, error)
 
+	// AllForUser returns every reaction a person has made, keyed by post.
+	//
+	// Read once per person rather than once per person per post: it is what
+	// lets Redis hold only real reactions and still answer "did I react to
+	// this?" for posts they merely scrolled past.
+	AllForUser(ctx context.Context, userID uint) (map[uint]UserReaction, error)
+
+	// CountsForPosts tallies several posts at once, so warming a page of a
+	// feed is one query rather than one per post.
+	CountsForPosts(ctx context.Context, postIDs []uint) (map[uint]map[string]int64, error)
+
 	// WithTx returns a repository bound to a transaction, so the flusher can
 	// commit its upserts and deletes together.
 	WithTx(tx *gorm.DB) ReactionRepository
+}
+
+// UserReaction is a stored reaction as the cache needs it.
+type UserReaction struct {
+	Type      string
+	UpdatedAt time.Time
 }
 
 type reactionRepository struct {
@@ -111,6 +128,71 @@ func (r *reactionRepository) DeleteBatch(ctx context.Context, pairs []PostUser) 
 	}
 
 	return nil
+}
+
+func (r *reactionRepository) AllForUser(ctx context.Context, userID uint) (map[uint]UserReaction, error) {
+	var rows []struct {
+		PostID    uint
+		Type      string
+		UpdatedAt time.Time
+	}
+
+	err := r.db.WithContext(ctx).
+		Model(&models.Reaction{}).
+		Select("post_id", "type", "updated_at").
+		Where("user_id = ?", userID).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("reactions: read reactions of user %d: %w", userID, err)
+	}
+
+	out := make(map[uint]UserReaction, len(rows))
+	for _, row := range rows {
+		out[row.PostID] = UserReaction{Type: row.Type, UpdatedAt: row.UpdatedAt}
+	}
+	return out, nil
+}
+
+// CountsForPosts groups by post as well as by type, so one query warms a whole
+// page of a feed.
+func (r *reactionRepository) CountsForPosts(ctx context.Context, postIDs []uint) (map[uint]map[string]int64, error) {
+	out := make(map[uint]map[string]int64, len(postIDs))
+	if len(postIDs) == 0 {
+		return out, nil
+	}
+
+	var rows []struct {
+		PostID uint
+		Type   string
+		Total  int64
+	}
+
+	err := r.db.WithContext(ctx).
+		Model(&models.Reaction{}).
+		Select("post_id, type, COUNT(*) AS total").
+		Where("post_id IN ?", postIDs).
+		Group("post_id, type").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("reactions: count for %d post(s): %w", len(postIDs), err)
+	}
+
+	for _, row := range rows {
+		if out[row.PostID] == nil {
+			out[row.PostID] = map[string]int64{}
+		}
+		out[row.PostID][row.Type] = row.Total
+	}
+
+	// Posts with no reactions still need an entry, or they look unhydrated
+	// forever and re-query on every read.
+	for _, id := range postIDs {
+		if out[id] == nil {
+			out[id] = map[string]int64{}
+		}
+	}
+
+	return out, nil
 }
 
 func (r *reactionRepository) CountsForPost(ctx context.Context, postID uint) (map[string]int64, error) {

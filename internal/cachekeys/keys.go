@@ -17,9 +17,21 @@ func ReactionCounts(postID uint) string {
 	return cache.Key("reactions", "count", postID)
 }
 
-// ReactionUser is one person's current choice on one post.
-func ReactionUser(postID, userID uint) string {
-	return cache.Key("reactions", "user", postID, userID)
+// ReactionByUser is one person's reactions, a field per post.
+//
+// Keyed by user rather than by (post, user) pair, and holding only reactions
+// they actually made. A key per pair would grow with views rather than with
+// reactions — every reader of every post leaving a permanent trace — which is
+// the difference between gigabytes and megabytes at scale.
+func ReactionByUser(userID uint) string {
+	return cache.Key("reactions", "byuser", userID)
+}
+
+// ReactionUserLoaded marks that a person's complete set of reactions is in
+// Redis. It is what lets a missing field mean "they did not react" rather than
+// "we have not looked", without storing anything per post they merely read.
+func ReactionUserLoaded(userID uint) string {
+	return cache.Key("reactions", "loaded", userID)
 }
 
 // ReactionHydrated marks that a post's counts have been loaded from MySQL.

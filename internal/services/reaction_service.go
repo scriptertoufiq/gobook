@@ -15,8 +15,9 @@ import (
 // nothing about HTTP.
 //
 // Reads and writes go to Redis; MySQL is consulted only to warm a post nobody
-// has touched since the last restart, and is written only by the background
-// flusher. A request never waits on a durable write.
+// has touched since the last restart, or a person whose reactions are not
+// loaded yet, and is written only by the background flusher. A request never
+// waits on a durable write.
 type ReactionService struct {
 	store *reactions.Store
 	repo  repositories.ReactionRepository
@@ -62,10 +63,14 @@ func (s *ReactionService) Set(
 		return Summary{}, err
 	}
 
-	// Before anything increments the tally. A post's hash must carry its stored
-	// baseline before a live reaction lands on it, or the count is short by
-	// however many reactions the database already held.
-	if err := s.ensureHydrated(ctx, postID); err != nil {
+	// Both baselines must be in place before anything is incremented: the
+	// post's tally, or the count is short by whatever the database already
+	// held, and this person's set, or their existing reaction is invisible and
+	// gets double-counted.
+	if err := s.warmPosts(ctx, []uint{postID}); err != nil {
+		return Summary{}, err
+	}
+	if err := s.warmUser(ctx, userID); err != nil {
 		return Summary{}, err
 	}
 
@@ -78,17 +83,14 @@ func (s *ReactionService) Set(
 		mine = ""
 	}
 
-	// Not applied means a newer reaction was already recorded — the caller is
-	// replaying something stale. The tally returned is the current one, so the
-	// client can settle on it and stop retrying.
 	return Summary{Counts: tally.Counts, Total: tally.Total, Mine: mine, Applied: applied}, nil
 }
 
 // stamp normalises when an action happened.
 //
 // A zero time means "now" — an ordinary online request. A supplied time comes
-// from a client replaying its offline queue, and is clamped to the present:
-// a device with a wrong clock claiming the future would otherwise win every
+// from a client replaying its offline queue, and is clamped to the present: a
+// device with a wrong clock claiming the future would otherwise win every
 // conflict for as long as its clock stayed ahead.
 func (s *ReactionService) stamp(actedAt time.Time) time.Time {
 	now := time.Now()
@@ -108,22 +110,16 @@ func (s *ReactionService) Remove(
 	if _, _, err := s.posts.Get(ctx, postID); err != nil {
 		return Summary{}, err
 	}
-
-	if err := s.ensureHydrated(ctx, postID); err != nil {
+	if err := s.warmPosts(ctx, []uint{postID}); err != nil {
+		return Summary{}, err
+	}
+	if err := s.warmUser(ctx, userID); err != nil {
 		return Summary{}, err
 	}
 
-	current, known, err := s.store.Mine(ctx, postID, userID)
+	current, _, err := s.store.Mine(ctx, postID, userID)
 	if err != nil {
 		return Summary{}, apperror.Internal(err)
-	}
-
-	if !known {
-		// Not loaded yet — the answer is in MySQL.
-		current, err = s.hydrateMine(ctx, postID, userID)
-		if err != nil {
-			return Summary{}, err
-		}
 	}
 
 	if current == "" {
@@ -140,8 +136,8 @@ func (s *ReactionService) Remove(
 
 	// Report what the script left in place rather than assuming the removal
 	// took. A replayed removal older than the stored reaction is rejected, and
-	// saying the reaction is gone when it is not would have the client render
-	// a state the server does not hold.
+	// saying the reaction is gone when it is not would have the client render a
+	// state the server does not hold.
 	if mine == reactions.None {
 		mine = ""
 	}
@@ -149,116 +145,134 @@ func (s *ReactionService) Remove(
 	return Summary{Counts: tally.Counts, Total: tally.Total, Mine: mine, Applied: applied}, nil
 }
 
-// Summary reads a post's tally and the viewer's own choice, warming whichever
-// is missing from the database exactly once.
+// Summary reads one post's tally and the viewer's own choice.
 //
 // Pass 0 for viewerID to read the tally without a personal answer.
 func (s *ReactionService) Summary(ctx context.Context, postID, viewerID uint) (Summary, error) {
-	if err := s.ensureHydrated(ctx, postID); err != nil {
+	all, err := s.SummariseMany(ctx, []uint{postID}, viewerID)
+	if err != nil {
 		return Summary{}, err
 	}
 
-	// Read from Redis, never from the hydration result. Redis is authoritative
-	// here — the database lags behind by up to a flush interval — so returning
-	// what MySQL held would report a stale tally, and would report an empty one
-	// for any post whose reactions have not been flushed yet.
-	tally, _, err := s.store.Counts(ctx, postID)
-	if err != nil {
-		return Summary{}, apperror.Internal(err)
+	summary, ok := all[postID]
+	if !ok {
+		return Summary{Counts: map[string]int64{}, Applied: true}, nil
 	}
-
-	summary := Summary{Counts: tally.Counts, Total: tally.Total, Applied: true}
-	if viewerID == 0 {
-		return summary, nil
-	}
-
-	mine, known, err := s.store.Mine(ctx, postID, viewerID)
-	if err != nil {
-		return Summary{}, apperror.Internal(err)
-	}
-	if !known {
-		mine, err = s.hydrateMine(ctx, postID, viewerID)
-		if err != nil {
-			return Summary{}, err
-		}
-	}
-
-	summary.Mine = mine
 	return summary, nil
 }
 
-// ensureHydrated guarantees a post's tally carries its stored baseline before
-// anything reads or increments it.
+// SummariseMany reads tallies for a page of posts.
 //
-// Runs once per post per Redis lifetime: the marker it sets is what makes every
-// later call a single EXISTS. The store applies the baseline atomically, so two
-// requests racing here cannot lose a reaction between them.
-func (s *ReactionService) ensureHydrated(ctx context.Context, postID uint) error {
-	_, hydrated, err := s.store.Counts(ctx, postID)
+// The cost is fixed rather than per-post: one pipeline for every tally, one
+// HMGET for the viewer's own reactions, and at most one database query for
+// whatever is not warm yet. The earlier version looped post by post, which on
+// a ten-post feed meant twenty sequential round trips and up to ten separate
+// queries.
+func (s *ReactionService) SummariseMany(
+	ctx context.Context,
+	postIDs []uint,
+	viewerID uint,
+) (map[uint]Summary, error) {
+	out := make(map[uint]Summary, len(postIDs))
+	if len(postIDs) == 0 {
+		return out, nil
+	}
+
+	if err := s.warmPosts(ctx, postIDs); err != nil {
+		return nil, err
+	}
+	if err := s.warmUser(ctx, viewerID); err != nil {
+		return nil, err
+	}
+
+	tallies, _, err := s.store.CountsMany(ctx, postIDs)
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+
+	mine := map[uint]string{}
+	if viewerID != 0 {
+		mine, _, err = s.store.MineMany(ctx, postIDs, viewerID)
+		if err != nil {
+			return nil, apperror.Internal(err)
+		}
+	}
+
+	for _, id := range postIDs {
+		tally := tallies[id]
+		out[id] = Summary{
+			Counts:  tally.Counts,
+			Total:   tally.Total,
+			Mine:    mine[id],
+			Applied: true,
+		}
+	}
+
+	return out, nil
+}
+
+// warmPosts loads the stored baseline for any of these posts that lacks one.
+//
+// One query for the whole page, not one per post. Hydration happens once per
+// post per Redis lifetime; after that this costs a single pipelined EXISTS each.
+func (s *ReactionService) warmPosts(ctx context.Context, postIDs []uint) error {
+	_, cold, err := s.store.CountsMany(ctx, postIDs)
 	if err != nil {
 		return apperror.Internal(err)
 	}
-	if hydrated {
+	if len(cold) == 0 {
 		return nil
 	}
 
-	counts, err := s.repo.CountsForPost(ctx, postID)
+	counts, err := s.repo.CountsForPosts(ctx, cold)
 	if err != nil {
 		return apperror.Internal(err)
 	}
 
-	if err := s.store.Hydrate(ctx, postID, counts); err != nil {
-		// Not fatal: the tally Redis already holds is still the live one, and
-		// the next request will try again.
-		log.Printf("reactions: could not hydrate post %d: %v", postID, err)
+	for _, id := range cold {
+		if err := s.store.Hydrate(ctx, id, counts[id]); err != nil {
+			// The tally Redis already holds is still the live one; the next
+			// read will try again rather than the request failing.
+			log.Printf("reactions: could not hydrate post %d: %v", id, err)
+		}
 	}
 
 	return nil
 }
 
-// hydrateMine reads one person's stored reaction and caches it — including the
-// fact that they have none, which is what stops the lookup repeating on every
-// page view by a non-reactor.
-func (s *ReactionService) hydrateMine(ctx context.Context, postID, userID uint) (string, error) {
-	stored, storedAt, err := s.repo.TypeForUser(ctx, postID, userID)
+// warmUser loads a person's complete set of reactions, once.
+//
+// This is what allows Redis to store nothing at all for the posts somebody
+// merely scrolled past: with their full set present, a missing field is a
+// definite "they did not react" rather than "we have not checked".
+func (s *ReactionService) warmUser(ctx context.Context, userID uint) error {
+	if userID == 0 {
+		return nil
+	}
+
+	loaded, err := s.store.UserLoaded(ctx, userID)
 	if err != nil {
-		return "", apperror.Internal(err)
+		return apperror.Internal(err)
+	}
+	if loaded {
+		return nil
 	}
 
-	if err := s.store.RememberMine(ctx, postID, userID, stored, storedAt); err != nil {
-		log.Printf("reactions: could not cache reaction of user %d on post %d: %v", userID, postID, err)
+	stored, err := s.repo.AllForUser(ctx, userID)
+	if err != nil {
+		return apperror.Internal(err)
 	}
 
-	return stored, nil
-}
-
-// SummariseMany reads tallies for a page of posts.
-//
-// Sequential rather than pipelined, because each post may need hydrating from
-// a different set of rows and that cannot be batched into one Redis call. It
-// is still cheap — a hydrated post costs two Redis reads — and it only touches
-// the database for posts nobody has looked at since the last restart.
-//
-// A failure on one post yields an empty tally for it rather than failing the
-// whole page: a feed that renders without counts beats a feed that does not
-// render.
-func (s *ReactionService) SummariseMany(
-	ctx context.Context,
-	postIDs []uint,
-	viewerID uint,
-) map[uint]Summary {
-	out := make(map[uint]Summary, len(postIDs))
-
-	for _, id := range postIDs {
-		summary, err := s.Summary(ctx, id, viewerID)
-		if err != nil {
-			log.Printf("reactions: could not summarise post %d for a listing: %v", id, err)
-			continue
-		}
-		out[id] = summary
+	converted := make(map[uint]reactions.StoredReaction, len(stored))
+	for postID, r := range stored {
+		converted[postID] = reactions.StoredReaction{Type: r.Type, At: r.UpdatedAt}
 	}
 
-	return out
+	if err := s.store.LoadUser(ctx, userID, converted); err != nil {
+		log.Printf("reactions: could not load reactions of user %d: %v", userID, err)
+	}
+
+	return nil
 }
 
 // Forget clears a deleted post's cached tally. Its rows go with the post

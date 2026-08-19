@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 
 	"github.com/redis/go-redis/v9"
@@ -13,6 +14,28 @@ import (
 	"github.com/scriptertoufiq/gobook/internal/models"
 	"github.com/scriptertoufiq/gobook/internal/repositories"
 )
+
+// scanBatch is how many pending entries are read per SSCAN round trip.
+const scanBatch = 512
+
+// parsePair reverses the "postID:userID" token used in the pending set.
+func parsePair(token string) (repositories.PostUser, error) {
+	postRaw, userRaw, ok := strings.Cut(token, ":")
+	if !ok {
+		return repositories.PostUser{}, fmt.Errorf("reactions: malformed pending entry %q", token)
+	}
+
+	postID, err := strconv.ParseUint(postRaw, 10, 64)
+	if err != nil {
+		return repositories.PostUser{}, fmt.Errorf("reactions: malformed post id in %q", token)
+	}
+	userID, err := strconv.ParseUint(userRaw, 10, 64)
+	if err != nil {
+		return repositories.PostUser{}, fmt.Errorf("reactions: malformed user id in %q", token)
+	}
+
+	return repositories.PostUser{PostID: uint(postID), UserID: uint(userID)}, nil
+}
 
 // Batch is a set of pending writes claimed for one flush.
 type Batch struct {
@@ -62,10 +85,28 @@ func (s *Store) Claim(ctx context.Context, runID string) (Batch, error) {
 func (s *Store) resolve(ctx context.Context, runID string) (Batch, error) {
 	setKey := s.key(cachekeys.ReactionFlushing(runID))
 
-	tokens, err := s.client.SMembers(ctx, setKey).Result()
-	if err != nil {
-		return Batch{}, fmt.Errorf("reactions: read claimed set %s: %w", runID, err)
+	// SSCAN rather than SMEMBERS. If the flusher ever falls behind — a traffic
+	// spike, a slow database — the claimed set can hold hundreds of thousands
+	// of entries, and SMEMBERS would pull all of them back in one blocking
+	// call. Redis is single-threaded, so that stalls every other client at
+	// exactly the moment the app is already struggling.
+	var (
+		cursor uint64
+		tokens []string
+	)
+	for {
+		page, next, err := s.client.SScan(ctx, setKey, cursor, "", scanBatch).Result()
+		if err != nil {
+			return Batch{}, fmt.Errorf("reactions: read claimed set %s: %w", runID, err)
+		}
+
+		tokens = append(tokens, page...)
+		cursor = next
+		if cursor == 0 {
+			break
+		}
 	}
+
 	if len(tokens) == 0 {
 		return Batch{RunID: runID}, nil
 	}
@@ -83,7 +124,7 @@ func (s *Store) resolve(ctx context.Context, runID string) (Batch, error) {
 			// flush if it were left in place. Skipping drops it with the batch.
 			continue
 		}
-		cmds[i] = pipe.Get(ctx, s.key(cachekeys.ReactionUser(pair.PostID, pair.UserID)))
+		cmds[i] = pipe.HGet(ctx, s.key(cachekeys.ReactionByUser(pair.UserID)), field(pair.PostID))
 		pairs = append(pairs, pair)
 		valid = append(valid, i)
 	}
@@ -99,10 +140,16 @@ func (s *Store) resolve(ctx context.Context, runID string) (Batch, error) {
 
 		raw, err := cmds[idx].Result()
 		if errors.Is(err, redis.Nil) {
-			// Absent means the key was evicted or expired, which should not
-			// happen for reaction keys — either way there is nothing to store,
-			// so treat it the same as an explicit removal.
-			batch.Deletes = append(batch.Deletes, pair)
+			// Absent is skipped, never treated as a removal.
+			//
+			// A removal always writes the '-' sentinel, so absence can only mean
+			// the value went missing — expired, evicted, or flushed by another
+			// instance between the claim and this read. Deleting on that basis
+			// would erase a reaction the person still holds, and the moment
+			// these keys carry a TTL that stops being hypothetical. Leaving the
+			// row alone is the recoverable choice: the worst case is a stored
+			// reaction that is briefly out of date, which the next write or the
+			// reconcile pass corrects.
 			continue
 		}
 		if err != nil {
@@ -132,6 +179,35 @@ func (s *Store) resolve(ctx context.Context, runID string) (Batch, error) {
 	}
 
 	return batch, nil
+}
+
+// ClearRemoved deletes the fields of reactions that have just been persisted
+// as removals.
+//
+// The '-' marker exists only so the flusher can tell "took it back" from "never
+// reacted". Once the deletion is in the database it has done its job, and
+// leaving it would put the app back to holding a record per person per post —
+// the very thing keying by user avoids. Called after the commit, so a failure
+// here costs a stale marker, never a lost write.
+func (s *Store) ClearRemoved(ctx context.Context, pairs []repositories.PostUser) error {
+	if len(pairs) == 0 {
+		return nil
+	}
+
+	byUser := make(map[uint][]string, len(pairs))
+	for _, p := range pairs {
+		byUser[p.UserID] = append(byUser[p.UserID], field(p.PostID))
+	}
+
+	pipe := s.client.Pipeline()
+	for userID, fields := range byUser {
+		pipe.HDel(ctx, s.key(cachekeys.ReactionByUser(userID)), fields...)
+	}
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("reactions: clear %d persisted removal(s): %w", len(pairs), err)
+	}
+	return nil
 }
 
 // Release drops a claimed set. Called only after the database write commits —

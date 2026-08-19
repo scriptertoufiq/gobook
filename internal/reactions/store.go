@@ -4,8 +4,18 @@
 //
 // It keeps its own Redis client rather than going through pkg/cache. That
 // package is a JSON get/set/delete cache by design; reactions need hashes,
-// sets and a Lua script, and widening the general cache to fit one feature
-// would make it worse at the job it already does.
+// sets and Lua, and widening the general cache to fit one feature would make
+// it worse at the job it already does.
+//
+// # How memory is bounded
+//
+// A person's reactions live in one hash keyed by user, holding a field only
+// for posts they actually reacted to. The obvious alternative — a key per
+// (post, user) — grows with *views* rather than with reactions, because every
+// reader of every post leaves a permanent trace behind. Measured on this
+// setup that is 103 bytes per view against 29 bytes per reaction: 19 GB versus
+// 1.4 GB once the app is large. Nothing is written for somebody who merely
+// reads a post.
 package reactions
 
 import (
@@ -19,24 +29,21 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/scriptertoufiq/gobook/internal/cachekeys"
-	"github.com/scriptertoufiq/gobook/internal/repositories"
 )
 
-// None is written when somebody takes their reaction back.
+// None marks a reaction that was taken back but not yet written to the
+// database.
 //
-// Removing writes this sentinel instead of deleting the key, so an absent key
-// means one thing only: nobody has looked this person up yet. Without it, "has
-// no reaction" and "not loaded" are indistinguishable, and every page view by
-// a non-reactor — most of them — would re-query MySQL forever.
+// It is a short-lived marker, not storage: the flusher deletes the field once
+// the removal has been persisted. Keeping it any longer would put the app back
+// to holding a record per person per post, which is exactly what this layout
+// avoids. A person who never reacted has no field at all.
 const None = "-"
 
-// A stored reaction is "type|unixMillis" — the choice, and when the person
-// made it.
+// A stored reaction is "type|unixMillis" — the choice, and when it was made.
 //
 // The timestamp is what lets a reaction queued on a phone with no signal be
-// replayed later without stamping on a newer one made since. Keeping it in the
-// same string rather than a second key is what keeps the whole update inside
-// one script.
+// replayed later without stamping on a newer one made since.
 const valueSeparator = "|"
 
 func encodeValue(reaction string, atMillis int64) string {
@@ -44,8 +51,7 @@ func encodeValue(reaction string, atMillis int64) string {
 }
 
 // decodeValue splits a stored value. A value with no separator is read as a
-// bare reaction from before timestamps existed, at time zero, so anything
-// newer replaces it.
+// bare reaction at time zero, so anything newer replaces it.
 func decodeValue(raw string) (string, int64) {
 	reaction, at, ok := strings.Cut(raw, valueSeparator)
 	if !ok {
@@ -58,6 +64,8 @@ func decodeValue(raw string) (string, int64) {
 	}
 	return reaction, millis
 }
+
+func field(postID uint) string { return strconv.FormatUint(uint64(postID), 10) }
 
 // Options configures the store's own connection pool.
 type Options struct {
@@ -84,10 +92,13 @@ type Store struct {
 // This has to be a script. Changing love to angry means decrementing one field
 // and incrementing another; sent as two commands another request can interleave
 // between them, and the counts drift away from the reactions they count —
-// permanently, because nothing on the read path ever recomputes them. Redis
-// runs a script to completion with nothing in between.
+// permanently, because nothing on the read path recomputes them.
+//
+//	KEYS[1] the person's reaction hash   KEYS[2] the post's tally   KEYS[3] pending set
+//	ARGV[1] new reaction                 ARGV[2] "postID:userID"
+//	ARGV[3] action time in millis        ARGV[4] the post id, as a hash field
 var setScript = redis.NewScript(`
-local raw = redis.call('GET', KEYS[1])
+local raw = redis.call('HGET', KEYS[1], ARGV[4])
 local old, oldAt = '-', 0
 
 if raw then
@@ -119,7 +130,7 @@ if new ~= '-' then
   redis.call('HINCRBY', KEYS[2], new, 1)
 end
 
-redis.call('SET', KEYS[1], new .. '|' .. ARGV[3])
+redis.call('HSET', KEYS[1], ARGV[4], new .. '|' .. ARGV[3])
 redis.call('SADD', KEYS[3], ARGV[2])
 
 return {'applied', new, redis.call('HGETALL', KEYS[2])}
@@ -128,10 +139,9 @@ return {'applied', new, redis.call('HGETALL', KEYS[2])}
 // hydrateScript writes a post's baseline from the database and marks it
 // loaded, but only if nobody has done so already.
 //
-// Atomic for the same reason the set script is: between checking the marker and
-// writing the baseline, a live reaction could increment a field, and a plain
-// HSET would then overwrite it back down. Doing both inside one script means an
-// increment can only land before or after, never in the middle.
+// Atomic for the same reason: between checking the marker and writing the
+// baseline, a live reaction could increment a field, and a plain HSET would
+// overwrite it back down.
 var hydrateScript = redis.NewScript(`
 if redis.call('EXISTS', KEYS[2]) == 1 then
   return 0
@@ -185,12 +195,10 @@ type Tally struct {
 	Total  int64
 }
 
-// Set applies a reaction made at actedAt, and reports the person's resulting
-// choice along with the fresh tally.
+// Set applies a reaction made at actedAt.
 //
 // applied is false when the action was older than what is already stored — a
-// queued offline reaction arriving after a newer one. Nothing changes in that
-// case; the caller is told so it can stop retrying.
+// queued offline reaction arriving after a newer one. Nothing changes then.
 func (s *Store) Set(
 	ctx context.Context,
 	postID, userID uint,
@@ -198,13 +206,13 @@ func (s *Store) Set(
 	actedAt time.Time,
 ) (mine string, tally Tally, applied bool, err error) {
 	keys := []string{
-		s.key(cachekeys.ReactionUser(postID, userID)),
+		s.key(cachekeys.ReactionByUser(userID)),
 		s.key(cachekeys.ReactionCounts(postID)),
 		s.key(cachekeys.ReactionDirty()),
 	}
 
 	raw, err := s.set.Run(ctx, s.client, keys,
-		reaction, pairToken(postID, userID), actedAt.UnixMilli()).Slice()
+		reaction, pairToken(postID, userID), actedAt.UnixMilli(), field(postID)).Slice()
 	if err != nil {
 		return "", Tally{}, false, fmt.Errorf(
 			"reactions: apply %q for user %d on post %d: %w", reaction, userID, postID, err)
@@ -239,29 +247,116 @@ func (s *Store) Counts(ctx context.Context, postID uint) (Tally, bool, error) {
 	return tallyFromMap(countsCmd.Val()), hydratedCmd.Val() == 1, nil
 }
 
-// Mine reads one person's choice. The bool reports whether Redis knew — false
-// means nobody has looked this person up yet and MySQL still has the answer.
-func (s *Store) Mine(ctx context.Context, postID, userID uint) (string, bool, error) {
-	value, err := s.client.Get(ctx, s.key(cachekeys.ReactionUser(postID, userID))).Result()
-	switch {
-	case errors.Is(err, redis.Nil):
-		return "", false, nil
-	case err != nil:
-		return "", false, fmt.Errorf("reactions: read reaction of user %d on post %d: %w", userID, postID, err)
+// CountsMany reads tallies for a page of posts in one round trip.
+//
+// The whole point of the batch: a feed of ten posts costs one pipeline rather
+// than ten sequential exchanges. Posts still needing hydration are reported so
+// the caller can load them together instead of one query at a time.
+func (s *Store) CountsMany(ctx context.Context, postIDs []uint) (map[uint]Tally, []uint, error) {
+	if len(postIDs) == 0 {
+		return map[uint]Tally{}, nil, nil
 	}
 
-	reaction, _ := decodeValue(value)
-	if reaction == None {
-		return "", true, nil
+	pipe := s.client.Pipeline()
+	counts := make([]*redis.MapStringStringCmd, len(postIDs))
+	hydrated := make([]*redis.IntCmd, len(postIDs))
+
+	for i, id := range postIDs {
+		counts[i] = pipe.HGetAll(ctx, s.key(cachekeys.ReactionCounts(id)))
+		hydrated[i] = pipe.Exists(ctx, s.key(cachekeys.ReactionHydrated(id)))
 	}
-	return reaction, true, nil
+
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return nil, nil, fmt.Errorf("reactions: read counts for %d post(s): %w", len(postIDs), err)
+	}
+
+	tallies := make(map[uint]Tally, len(postIDs))
+	var cold []uint
+
+	for i, id := range postIDs {
+		tallies[id] = tallyFromMap(counts[i].Val())
+		if hydrated[i].Val() != 1 {
+			cold = append(cold, id)
+		}
+	}
+
+	return tallies, cold, nil
+}
+
+// Mine reads one person's choice on one post. The bool reports whether Redis
+// could answer — false means this person's reactions are not loaded and MySQL
+// still holds the truth.
+func (s *Store) Mine(ctx context.Context, postID, userID uint) (string, bool, error) {
+	mine, known, err := s.MineMany(ctx, []uint{postID}, userID)
+	if err != nil || !known {
+		return "", known, err
+	}
+	return mine[postID], true, nil
+}
+
+// UserLoaded reports whether this person's complete set of reactions is in
+// Redis.
+//
+// A method of its own rather than a call to MineMany with no posts: that
+// returns early on an empty list, so using it as a probe silently answers
+// "loaded" for everybody and nothing is ever warmed.
+func (s *Store) UserLoaded(ctx context.Context, userID uint) (bool, error) {
+	if userID == 0 {
+		return true, nil
+	}
+
+	n, err := s.client.Exists(ctx, s.key(cachekeys.ReactionUserLoaded(userID))).Result()
+	if err != nil {
+		return false, fmt.Errorf("reactions: check whether user %d is loaded: %w", userID, err)
+	}
+	return n == 1, nil
+}
+
+// MineMany reads a person's choices across a page of posts.
+//
+// One HMGET for the whole page — the reason this layout is keyed by user. A
+// missing field means they did not react, which is only a safe conclusion
+// because the loaded marker says their full set is present.
+func (s *Store) MineMany(ctx context.Context, postIDs []uint, userID uint) (map[uint]string, bool, error) {
+	if userID == 0 || len(postIDs) == 0 {
+		return map[uint]string{}, true, nil
+	}
+
+	pipe := s.client.Pipeline()
+	loadedCmd := pipe.Exists(ctx, s.key(cachekeys.ReactionUserLoaded(userID)))
+
+	fields := make([]string, len(postIDs))
+	for i, id := range postIDs {
+		fields[i] = field(id)
+	}
+	valuesCmd := pipe.HMGet(ctx, s.key(cachekeys.ReactionByUser(userID)), fields...)
+
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return nil, false, fmt.Errorf("reactions: read reactions of user %d: %w", userID, err)
+	}
+
+	if loadedCmd.Val() != 1 {
+		return nil, false, nil
+	}
+
+	out := make(map[uint]string, len(postIDs))
+	for i, raw := range valuesCmd.Val() {
+		text, ok := raw.(string)
+		if !ok {
+			continue // absent field: they did not react to this one
+		}
+
+		reaction, _ := decodeValue(text)
+		if reaction != None {
+			out[postIDs[i]] = reaction
+		}
+	}
+
+	return out, true, nil
 }
 
 // Hydrate seeds a post's tally from the database and marks it loaded, unless
 // that has already happened.
-//
-// It deliberately does not touch the dirty set: nothing changed, it was only
-// read.
 func (s *Store) Hydrate(ctx context.Context, postID uint, counts map[string]int64) error {
 	keys := []string{
 		s.key(cachekeys.ReactionCounts(postID)),
@@ -279,30 +374,39 @@ func (s *Store) Hydrate(ctx context.Context, postID uint, counts map[string]int6
 	return nil
 }
 
-// RememberMine caches one person's stored choice, including the fact that they
-// have none. Pass "" for no reaction and the sentinel is written for you.
+// LoadUser writes a person's complete set of stored reactions and marks them
+// loaded.
 //
-// storedAt is when the database row was last written, so a queued offline
-// action older than it is still correctly rejected.
-func (s *Store) RememberMine(
-	ctx context.Context,
-	postID, userID uint,
-	reaction string,
-	storedAt time.Time,
-) error {
-	if reaction == "" {
-		reaction = None
-	}
+// Done once per person rather than once per person per post — the trade that
+// keeps nothing on record for the posts they only read. A user with no
+// reactions costs a single marker key.
+func (s *Store) LoadUser(ctx context.Context, userID uint, stored map[uint]StoredReaction) error {
+	pipe := s.client.TxPipeline()
 
-	key := s.key(cachekeys.ReactionUser(postID, userID))
-	if err := s.client.Set(ctx, key, encodeValue(reaction, storedAt.UnixMilli()), 0).Err(); err != nil {
-		return fmt.Errorf("reactions: cache reaction of user %d on post %d: %w", userID, postID, err)
+	if len(stored) > 0 {
+		values := make(map[string]any, len(stored))
+		for postID, r := range stored {
+			values[field(postID)] = encodeValue(r.Type, r.At.UnixMilli())
+		}
+		pipe.HSet(ctx, s.key(cachekeys.ReactionByUser(userID)), values)
+	}
+	pipe.Set(ctx, s.key(cachekeys.ReactionUserLoaded(userID)), "1", 0)
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("reactions: load reactions of user %d: %w", userID, err)
 	}
 	return nil
 }
 
-// Forget clears everything cached for a post. Called when a post is deleted —
-// its rows go with it via the foreign key, so the tally must go too.
+// StoredReaction is a reaction as the database holds it.
+type StoredReaction struct {
+	Type string
+	At   time.Time
+}
+
+// Forget clears a deleted post's tally. The per-user fields are left alone:
+// enumerating them would mean touching every reactor of a viral post, and they
+// cost nothing once nobody can read the post they point at.
 func (s *Store) Forget(ctx context.Context, postID uint) error {
 	err := s.client.Del(ctx,
 		s.key(cachekeys.ReactionCounts(postID)),
@@ -319,31 +423,12 @@ func pairToken(postID, userID uint) string {
 	return strconv.FormatUint(uint64(postID), 10) + ":" + strconv.FormatUint(uint64(userID), 10)
 }
 
-// parsePair reverses pairToken.
-func parsePair(token string) (repositories.PostUser, error) {
-	postRaw, userRaw, ok := strings.Cut(token, ":")
-	if !ok {
-		return repositories.PostUser{}, fmt.Errorf("reactions: malformed pending entry %q", token)
-	}
-
-	postID, err := strconv.ParseUint(postRaw, 10, 64)
-	if err != nil {
-		return repositories.PostUser{}, fmt.Errorf("reactions: malformed post id in %q", token)
-	}
-	userID, err := strconv.ParseUint(userRaw, 10, 64)
-	if err != nil {
-		return repositories.PostUser{}, fmt.Errorf("reactions: malformed user id in %q", token)
-	}
-
-	return repositories.PostUser{PostID: uint(postID), UserID: uint(userID)}, nil
-}
-
 // tallyFromMap builds a Tally from HGETALL output, dropping zeroes and
 // clamping negatives.
 //
 // A count that has drifted below zero should read as absent rather than as
-// "-3 angry" on somebody's screen. The nightly reconcile fixes the stored
-// number; this only stops a wrong one reaching a viewer.
+// "-3 angry" on somebody's screen. The reconcile pass fixes the stored number;
+// this only stops a wrong one reaching a viewer.
 func tallyFromMap(raw map[string]string) Tally {
 	tally := Tally{Counts: make(map[string]int64, len(raw))}
 

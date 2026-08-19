@@ -64,10 +64,15 @@ func (ctrl *PostController) Index(c *gin.Context) {
 			ids = append(ids, posts[i].ID)
 		}
 
-		summaries := ctrl.reactions.SummariseMany(c.Request.Context(), ids, viewer(c))
-		for i := range collection {
-			if summary, ok := summaries[collection[i].ID]; ok {
-				collection[i] = collection[i].WithReactions(resources.NewReactionResource(summary))
+		// A failure here leaves every post with its empty tally rather than
+		// failing the page: a feed that renders without counts beats a feed
+		// that does not render.
+		summaries, err := ctrl.reactions.SummariseMany(c.Request.Context(), ids, viewer(c))
+		if err == nil {
+			for i := range collection {
+				if summary, ok := summaries[collection[i].ID]; ok {
+					collection[i] = collection[i].WithReactions(resources.NewReactionResource(summary))
+				}
 			}
 		}
 	}
