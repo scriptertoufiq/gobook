@@ -46,6 +46,16 @@ type RedisConfig struct {
 	// specify. Short by default: a stale read is a bug report you cannot
 	// reproduce, so the cache should forget quickly until proven otherwise.
 	DefaultTTL time.Duration
+
+	// PostTTL overrides DefaultTTL for cached posts.
+	//
+	// Zero means the entries never expire. That is safe only because the post
+	// cache is maintained by events rather than by expiry — writing a post
+	// files it, editing replaces it, deleting removes it — so nothing depends
+	// on a clock to become correct. What expiry still protects against is a
+	// change made outside this application, and a listener that never ran
+	// because the process died between saving and announcing.
+	PostTTL time.Duration
 }
 
 // Addr is the host:port the Redis client expects.
@@ -208,6 +218,9 @@ func Load() *Config {
 			Timeout:     time.Duration(envInt("REDIS_TIMEOUT", 3)) * time.Second,
 			PoolSize:    envInt("REDIS_POOL_SIZE", 10),
 			DefaultTTL:  time.Duration(envInt("CACHE_DEFAULT_TTL", 300)) * time.Second,
+			// -1 is the "not configured" sentinel, so an explicit 0 can mean
+			// "never expire" rather than being mistaken for an absent value.
+			PostTTL: cacheTTL("CACHE_POST_TTL", envInt("CACHE_DEFAULT_TTL", 300)),
 		},
 		DB: DBConfig{
 			Host:            env("DB_HOST", "127.0.0.1"),
@@ -221,6 +234,16 @@ func Load() *Config {
 			ConnMaxLifetime: time.Duration(envInt("DB_CONN_MAX_LIFETIME", 60)) * time.Minute,
 		},
 	}
+}
+
+// cacheTTL reads a TTL in seconds, falling back to fallbackSeconds when the
+// variable is not set. A configured 0 is preserved and means "never expires".
+func cacheTTL(key string, fallbackSeconds int) time.Duration {
+	seconds := envInt(key, -1)
+	if seconds < 0 {
+		seconds = fallbackSeconds
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func (a AppConfig) IsProduction() bool { return a.Env == "production" }

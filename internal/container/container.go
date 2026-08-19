@@ -95,7 +95,7 @@ func Build(db *gorm.DB, cfg *config.Config) (*Container, error) {
 	// than inside a service — is what keeps "who reacts to what" answerable
 	// from one file.
 	dispatcher := events.New()
-	listeners.NewPostCacheListener(cacheStore, cfg.Redis.DefaultTTL).Register(dispatcher)
+	listeners.NewPostCacheListener(cacheStore, cfg.Redis.PostTTL).Register(dispatcher)
 
 	var apiLimiter, authLimiter *ratelimit.Limiter
 	if cfg.RateLimit.Enabled {
@@ -139,7 +139,7 @@ func Build(db *gorm.DB, cfg *config.Config) (*Container, error) {
 	// callback rather than a constructor argument.
 	userService.OnEmailNeedsVerification(authService.HandleEmailNeedsVerification)
 
-	postService := services.NewPostService(postRepo, cacheStore, dispatcher, cfg.Redis.DefaultTTL)
+	postService := services.NewPostService(postRepo, cacheStore, dispatcher, cfg.Redis.PostTTL)
 	// codegen:services
 
 	// Background jobs
@@ -185,8 +185,13 @@ func buildCache(cfg *config.Config) (cache.Cache, error) {
 		return nil, err
 	}
 
-	log.Printf("cache: redis at %s (db=%d, prefix=%q, default ttl=%s)",
-		cfg.Redis.Addr(), cfg.Redis.DB, cfg.Redis.Prefix, cfg.Redis.DefaultTTL)
+	postTTL := cfg.Redis.PostTTL.String()
+	if cfg.Redis.PostTTL == 0 {
+		postTTL = "never expires"
+	}
+
+	log.Printf("cache: redis at %s (db=%d, prefix=%q, default ttl=%s, post ttl=%s)",
+		cfg.Redis.Addr(), cfg.Redis.DB, cfg.Redis.Prefix, cfg.Redis.DefaultTTL, postTTL)
 
 	return store, nil
 }
