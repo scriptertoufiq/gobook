@@ -8,8 +8,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
-	"github.com/scriptertoufiq/go-mvc/pkg/pagination"
+	"github.com/scriptertoufiq/gobook/pkg/apperror"
+	"github.com/scriptertoufiq/gobook/pkg/pagination"
 )
 
 type Envelope struct {

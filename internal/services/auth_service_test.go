@@ -8,12 +8,12 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/scriptertoufiq/go-mvc/internal/models"
-	"github.com/scriptertoufiq/go-mvc/internal/repositories"
-	"github.com/scriptertoufiq/go-mvc/internal/requests"
-	"github.com/scriptertoufiq/go-mvc/internal/services"
-	"github.com/scriptertoufiq/go-mvc/pkg/jwt"
-	"github.com/scriptertoufiq/go-mvc/pkg/mailer"
+	"github.com/scriptertoufiq/gobook/internal/models"
+	"github.com/scriptertoufiq/gobook/internal/repositories"
+	"github.com/scriptertoufiq/gobook/internal/requests"
+	"github.com/scriptertoufiq/gobook/internal/services"
+	"github.com/scriptertoufiq/gobook/pkg/jwt"
+	"github.com/scriptertoufiq/gobook/pkg/mailer"
 )
 
 // ---------------------------------------------------------------- fake repos
@@ -200,7 +200,7 @@ func newAuthHarness(t *testing.T, requireVerification bool) *authHarness {
 	verificationRepo := newFakeVerificationRepo()
 	resetRepo := newFakePasswordResetRepo()
 	mail := &recordingMailer{}
-	manager := jwt.NewManager(strings.Repeat("x", 32), "go-mvc-test", 15*time.Minute)
+	manager := jwt.NewManager(strings.Repeat("x", 32), "gobook-test", 15*time.Minute)
 
 	users := services.NewUserService(userRepo, refreshRepo)
 
@@ -209,7 +209,7 @@ func newAuthHarness(t *testing.T, requireVerification bool) *authHarness {
 			users, userRepo, refreshRepo, verificationRepo, resetRepo,
 			manager, mail,
 			services.AuthOptions{
-				AppName:                  "go-mvc",
+				AppName:                  "GoBook",
 				AppURL:                   "http://localhost:8080",
 				RequireEmailVerification: requireVerification,
 				VerificationTTL:          24 * time.Hour,

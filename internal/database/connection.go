@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"github.com/scriptertoufiq/go-mvc/config"
+	"github.com/scriptertoufiq/gobook/config"
 )
 
 // Connect opens the pool and verifies it with a ping, so a bad DSN fails at

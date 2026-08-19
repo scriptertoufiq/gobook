@@ -10,8 +10,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/scriptertoufiq/go-mvc/internal/models"
-	"github.com/scriptertoufiq/go-mvc/internal/repositories"
+	"github.com/scriptertoufiq/gobook/internal/models"
+	"github.com/scriptertoufiq/gobook/internal/repositories"
 )
 
 // Flusher moves reactions from Redis into MySQL on an interval.

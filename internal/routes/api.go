@@ -3,9 +3,9 @@ package routes
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/scriptertoufiq/go-mvc/internal/container"
-	"github.com/scriptertoufiq/go-mvc/internal/middleware"
-	"github.com/scriptertoufiq/go-mvc/internal/models"
+	"github.com/scriptertoufiq/gobook/internal/container"
+	"github.com/scriptertoufiq/gobook/internal/middleware"
+	"github.com/scriptertoufiq/gobook/internal/models"
 )
 
 // registerAPI wires the /api/v1 group. Each resource gets a RESTful block:

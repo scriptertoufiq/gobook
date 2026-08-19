@@ -17,12 +17,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/scriptertoufiq/go-mvc/config"
-	"github.com/scriptertoufiq/go-mvc/internal/container"
-	"github.com/scriptertoufiq/go-mvc/internal/database"
-	"github.com/scriptertoufiq/go-mvc/internal/middleware"
-	"github.com/scriptertoufiq/go-mvc/internal/routes"
-	"github.com/scriptertoufiq/go-mvc/pkg/response"
+	"github.com/scriptertoufiq/gobook/config"
+	"github.com/scriptertoufiq/gobook/internal/container"
+	"github.com/scriptertoufiq/gobook/internal/database"
+	"github.com/scriptertoufiq/gobook/internal/middleware"
+	"github.com/scriptertoufiq/gobook/internal/routes"
+	"github.com/scriptertoufiq/gobook/pkg/response"
 )
 
 type App struct {

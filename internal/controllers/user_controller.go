@@ -7,14 +7,14 @@ package controllers
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/scriptertoufiq/go-mvc/internal/middleware"
-	"github.com/scriptertoufiq/go-mvc/internal/models"
-	"github.com/scriptertoufiq/go-mvc/internal/requests"
-	"github.com/scriptertoufiq/go-mvc/internal/resources"
-	"github.com/scriptertoufiq/go-mvc/internal/services"
-	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
-	"github.com/scriptertoufiq/go-mvc/pkg/pagination"
-	"github.com/scriptertoufiq/go-mvc/pkg/response"
+	"github.com/scriptertoufiq/gobook/internal/middleware"
+	"github.com/scriptertoufiq/gobook/internal/models"
+	"github.com/scriptertoufiq/gobook/internal/requests"
+	"github.com/scriptertoufiq/gobook/internal/resources"
+	"github.com/scriptertoufiq/gobook/internal/services"
+	"github.com/scriptertoufiq/gobook/pkg/apperror"
+	"github.com/scriptertoufiq/gobook/pkg/pagination"
+	"github.com/scriptertoufiq/gobook/pkg/response"
 )
 
 type UserController struct {

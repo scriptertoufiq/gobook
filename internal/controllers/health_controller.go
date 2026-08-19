@@ -4,9 +4,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
-	"github.com/scriptertoufiq/go-mvc/pkg/cache"
-	"github.com/scriptertoufiq/go-mvc/pkg/response"
+	"github.com/scriptertoufiq/gobook/pkg/apperror"
+	"github.com/scriptertoufiq/gobook/pkg/cache"
+	"github.com/scriptertoufiq/gobook/pkg/response"
 )
 
 type HealthController struct {

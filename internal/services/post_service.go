@@ -8,15 +8,15 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/scriptertoufiq/go-mvc/internal/cachekeys"
-	appevents "github.com/scriptertoufiq/go-mvc/internal/events"
-	"github.com/scriptertoufiq/go-mvc/internal/models"
-	"github.com/scriptertoufiq/go-mvc/internal/repositories"
-	"github.com/scriptertoufiq/go-mvc/internal/requests"
-	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
-	"github.com/scriptertoufiq/go-mvc/pkg/cache"
-	"github.com/scriptertoufiq/go-mvc/pkg/events"
-	"github.com/scriptertoufiq/go-mvc/pkg/pagination"
+	"github.com/scriptertoufiq/gobook/internal/cachekeys"
+	appevents "github.com/scriptertoufiq/gobook/internal/events"
+	"github.com/scriptertoufiq/gobook/internal/models"
+	"github.com/scriptertoufiq/gobook/internal/repositories"
+	"github.com/scriptertoufiq/gobook/internal/requests"
+	"github.com/scriptertoufiq/gobook/pkg/apperror"
+	"github.com/scriptertoufiq/gobook/pkg/cache"
+	"github.com/scriptertoufiq/gobook/pkg/events"
+	"github.com/scriptertoufiq/gobook/pkg/pagination"
 )
 
 // ownedBy reports whether the post belongs to this caller.

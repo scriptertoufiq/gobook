@@ -12,17 +12,17 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/scriptertoufiq/go-mvc/config"
-	"github.com/scriptertoufiq/go-mvc/internal/controllers"
-	"github.com/scriptertoufiq/go-mvc/internal/listeners"
-	"github.com/scriptertoufiq/go-mvc/internal/reactions"
-	"github.com/scriptertoufiq/go-mvc/internal/repositories"
-	"github.com/scriptertoufiq/go-mvc/internal/services"
-	"github.com/scriptertoufiq/go-mvc/pkg/cache"
-	"github.com/scriptertoufiq/go-mvc/pkg/events"
-	"github.com/scriptertoufiq/go-mvc/pkg/jwt"
-	"github.com/scriptertoufiq/go-mvc/pkg/mailer"
-	"github.com/scriptertoufiq/go-mvc/pkg/ratelimit"
+	"github.com/scriptertoufiq/gobook/config"
+	"github.com/scriptertoufiq/gobook/internal/controllers"
+	"github.com/scriptertoufiq/gobook/internal/listeners"
+	"github.com/scriptertoufiq/gobook/internal/reactions"
+	"github.com/scriptertoufiq/gobook/internal/repositories"
+	"github.com/scriptertoufiq/gobook/internal/services"
+	"github.com/scriptertoufiq/gobook/pkg/cache"
+	"github.com/scriptertoufiq/gobook/pkg/events"
+	"github.com/scriptertoufiq/gobook/pkg/jwt"
+	"github.com/scriptertoufiq/gobook/pkg/mailer"
+	"github.com/scriptertoufiq/gobook/pkg/ratelimit"
 )
 
 // Lines marked `codegen:` are insertion points for `go run ./cmd/make`.

@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/scriptertoufiq/go-mvc/internal/cachekeys"
-	appevents "github.com/scriptertoufiq/go-mvc/internal/events"
-	"github.com/scriptertoufiq/go-mvc/pkg/cache"
-	"github.com/scriptertoufiq/go-mvc/pkg/events"
+	"github.com/scriptertoufiq/gobook/internal/cachekeys"
+	appevents "github.com/scriptertoufiq/gobook/internal/events"
+	"github.com/scriptertoufiq/gobook/pkg/cache"
+	"github.com/scriptertoufiq/gobook/pkg/events"
 )
 
 // PostCacheListener keeps the post cache in step with the database.

@@ -5,8 +5,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/scriptertoufiq/go-mvc/internal/models"
-	"github.com/scriptertoufiq/go-mvc/pkg/pagination"
+	"github.com/scriptertoufiq/gobook/internal/models"
+	"github.com/scriptertoufiq/gobook/pkg/pagination"
 )
 
 // UserRepository is the contract the service depends on. Keeping it an

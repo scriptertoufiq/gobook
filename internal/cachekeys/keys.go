@@ -5,7 +5,7 @@
 // the kind of bug that only shows up in production.
 package cachekeys
 
-import "github.com/scriptertoufiq/go-mvc/pkg/cache"
+import "github.com/scriptertoufiq/gobook/pkg/cache"
 
 // Post is the key for a single post: "posts:show:<id>".
 func Post(id uint) string {

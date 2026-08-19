@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/scriptertoufiq/go-mvc/internal/models"
+	"github.com/scriptertoufiq/gobook/internal/models"
 )
 
 // PostUser identifies one person's reaction to one post — the pair the unique

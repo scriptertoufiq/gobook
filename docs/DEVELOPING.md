@@ -1,4 +1,4 @@
-# go-mvc
+# GoBook
 
 A REST API built with [Gin](https://gin-gonic.com) and [GORM](https://gorm.io),
 laid out in an MVC structure with a **service layer** and a **repository layer**
@@ -36,8 +36,8 @@ This is an application, not a library — there is nothing to `go get`. Clone it
 and build from the repository root.
 
 ```bash
-git clone https://github.com/scriptertoufiq/go-mvc.git
-cd go-mvc
+git clone https://github.com/scriptertoufiq/gobook.git
+cd gobook
 make setup          # copies .env.example -> .env, downloads modules
 ```
 
@@ -49,7 +49,7 @@ The generator can rewrite the module path, so the usual move is to take a copy
 with no shared history rather than a fork:
 
 ```bash
-git clone --depth 1 https://github.com/scriptertoufiq/go-mvc.git shop
+git clone --depth 1 https://github.com/scriptertoufiq/gobook.git shop
 cd shop
 rm -rf .git && git init          # detach from this repository's history
 
@@ -211,7 +211,7 @@ that reads `os.Getenv`; everything else receives a `*config.Config`.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `APP_NAME` | `go-mvc` | Label in the startup log and `/health` |
+| `APP_NAME` | `GoBook` | Label in the startup log and `/health` |
 | `APP_ENV` | `production` | **Unset defaults to production**, so a forgotten variable fails safe. `.env.example` sets `local` |
 | `APP_URL` | `http://localhost:8080` | Base for verification links |
 | `APP_PORT` | `8080` | HTTP listen port |
@@ -234,7 +234,7 @@ that reads `os.Getenv`; everything else receives a `*config.Config`.
 | `RATE_LIMIT_AUTH_WINDOW` | `60` | Auth window, seconds |
 | `TRUSTED_PROXIES` | *(empty)* | CIDRs whose `X-Forwarded-For` is believed. **Security-relevant** |
 | `JWT_SECRET` | *(none)* | **Required**, min 32 chars. Boot fails without it |
-| `JWT_ISSUER` | `go-mvc` | `iss` claim |
+| `JWT_ISSUER` | `gobook` | `iss` claim |
 | `JWT_ACCESS_TTL` | `15` | Access token lifetime, minutes |
 | `JWT_REFRESH_TTL` | `720` | Refresh token lifetime, hours |
 | `AUTH_REQUIRE_EMAIL_VERIFICATION` | `false` | The verification switch |
@@ -243,7 +243,7 @@ that reads `os.Getenv`; everything else receives a `*config.Config`.
 | `AUTH_PASSWORD_RESET_URL` | `{APP_URL}/reset-password` | Frontend form the reset link points at |
 | `MAIL_HOST` / `MAIL_PORT` | `127.0.0.1` / `1025` | SMTP relay |
 | `MAIL_USERNAME` / `MAIL_PASSWORD` | *(empty)* | Leave empty for a local relay |
-| `MAIL_FROM_ADDRESS` / `MAIL_FROM_NAME` | *(empty)* / `go-mvc` | Sender identity |
+| `MAIL_FROM_ADDRESS` / `MAIL_FROM_NAME` | *(empty)* / `GoBook` | Sender identity |
 
 A bad DSN fails at boot with a clear error rather than on the first request —
 `database.Connect` pings the pool before returning.
@@ -959,7 +959,7 @@ Nine steps, in order: model → migration → repository → service
 
 Two separate "names" that change independently.
 
-**Module path** — `github.com/scriptertoufiq/go-mvc`, what every import resolves
+**Module path** — `github.com/scriptertoufiq/gobook`, what every import resolves
 against. Roughly 60 occurrences across 20+ files:
 
 ```bash

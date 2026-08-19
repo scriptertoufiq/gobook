@@ -18,8 +18,8 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/scriptertoufiq/go-mvc/internal/cachekeys"
-	"github.com/scriptertoufiq/go-mvc/internal/repositories"
+	"github.com/scriptertoufiq/gobook/internal/cachekeys"
+	"github.com/scriptertoufiq/gobook/internal/repositories"
 )
 
 // None is written when somebody takes their reaction back.

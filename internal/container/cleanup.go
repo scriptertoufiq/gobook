@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/scriptertoufiq/go-mvc/internal/repositories"
+	"github.com/scriptertoufiq/gobook/internal/repositories"
 )
 
 // tokenSweepInterval is how often expired refresh tokens are purged. Hourly is

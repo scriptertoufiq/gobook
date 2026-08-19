@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	appevents "github.com/scriptertoufiq/go-mvc/internal/events"
-	"github.com/scriptertoufiq/go-mvc/internal/reactions"
-	"github.com/scriptertoufiq/go-mvc/pkg/events"
+	appevents "github.com/scriptertoufiq/gobook/internal/events"
+	"github.com/scriptertoufiq/gobook/internal/reactions"
+	"github.com/scriptertoufiq/gobook/pkg/events"
 )
 
 // PostReactionsListener clears a deleted post's tally.

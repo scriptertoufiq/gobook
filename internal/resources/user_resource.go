@@ -5,7 +5,7 @@ package resources
 import (
 	"time"
 
-	"github.com/scriptertoufiq/go-mvc/internal/models"
+	"github.com/scriptertoufiq/gobook/internal/models"
 )
 
 type UserResource struct {

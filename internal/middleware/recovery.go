@@ -7,8 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
-	"github.com/scriptertoufiq/go-mvc/pkg/response"
+	"github.com/scriptertoufiq/gobook/pkg/apperror"
+	"github.com/scriptertoufiq/gobook/pkg/response"
 )
 
 // Recovery converts a panic into the standard 500 envelope instead of letting

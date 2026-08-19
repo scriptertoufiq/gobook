@@ -9,7 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/scriptertoufiq/go-mvc/pkg/response"
+	"github.com/scriptertoufiq/gobook/pkg/response"
 )
 
 type signupBody struct {

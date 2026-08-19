@@ -3,7 +3,7 @@ package resources
 import (
 	"time"
 
-	"github.com/scriptertoufiq/go-mvc/internal/services"
+	"github.com/scriptertoufiq/gobook/internal/services"
 )
 
 // TokenResource is the login/refresh payload. expires_in is included alongside

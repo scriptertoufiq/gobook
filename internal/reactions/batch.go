@@ -9,9 +9,9 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/scriptertoufiq/go-mvc/internal/cachekeys"
-	"github.com/scriptertoufiq/go-mvc/internal/models"
-	"github.com/scriptertoufiq/go-mvc/internal/repositories"
+	"github.com/scriptertoufiq/gobook/internal/cachekeys"
+	"github.com/scriptertoufiq/gobook/internal/models"
+	"github.com/scriptertoufiq/gobook/internal/repositories"
 )
 
 // Batch is a set of pending writes claimed for one flush.

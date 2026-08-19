@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scriptertoufiq/go-mvc/pkg/ratelimit"
+	"github.com/scriptertoufiq/gobook/pkg/ratelimit"
 )
 
 // clock is a manually advanced time source, so these tests are deterministic

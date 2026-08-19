@@ -10,13 +10,13 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/scriptertoufiq/go-mvc/internal/models"
-	"github.com/scriptertoufiq/go-mvc/internal/repositories"
-	"github.com/scriptertoufiq/go-mvc/internal/requests"
-	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
-	"github.com/scriptertoufiq/go-mvc/pkg/jwt"
-	"github.com/scriptertoufiq/go-mvc/pkg/mailer"
-	"github.com/scriptertoufiq/go-mvc/pkg/token"
+	"github.com/scriptertoufiq/gobook/internal/models"
+	"github.com/scriptertoufiq/gobook/internal/repositories"
+	"github.com/scriptertoufiq/gobook/internal/requests"
+	"github.com/scriptertoufiq/gobook/pkg/apperror"
+	"github.com/scriptertoufiq/gobook/pkg/jwt"
+	"github.com/scriptertoufiq/gobook/pkg/mailer"
+	"github.com/scriptertoufiq/gobook/pkg/token"
 )
 
 // AuthOptions carries the knobs from config so the service never imports it.

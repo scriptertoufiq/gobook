@@ -5,10 +5,10 @@ import (
 	"log"
 	"time"
 
-	"github.com/scriptertoufiq/go-mvc/internal/models"
-	"github.com/scriptertoufiq/go-mvc/internal/reactions"
-	"github.com/scriptertoufiq/go-mvc/internal/repositories"
-	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
+	"github.com/scriptertoufiq/gobook/internal/models"
+	"github.com/scriptertoufiq/gobook/internal/reactions"
+	"github.com/scriptertoufiq/gobook/internal/repositories"
+	"github.com/scriptertoufiq/gobook/pkg/apperror"
 )
 
 // ReactionService owns the reaction rules. Like every service here it knows

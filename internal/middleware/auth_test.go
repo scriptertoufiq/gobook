@@ -9,14 +9,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/scriptertoufiq/go-mvc/internal/middleware"
-	"github.com/scriptertoufiq/go-mvc/pkg/jwt"
+	"github.com/scriptertoufiq/gobook/internal/middleware"
+	"github.com/scriptertoufiq/gobook/pkg/jwt"
 )
 
 func init() { gin.SetMode(gin.TestMode) }
 
 func newManager() *jwt.Manager {
-	return jwt.NewManager(strings.Repeat("k", 32), "go-mvc-test", 15*time.Minute)
+	return jwt.NewManager(strings.Repeat("k", 32), "gobook-test", 15*time.Minute)
 }
 
 // call drives a request through Auth plus the guard under test.

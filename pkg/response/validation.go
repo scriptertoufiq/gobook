@@ -13,7 +13,7 @@ import (
 	"github.com/gin-gonic/gin/binding"
 	"github.com/go-playground/validator/v10"
 
-	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
+	"github.com/scriptertoufiq/gobook/pkg/apperror"
 )
 
 var jsonNamesOnce sync.Once

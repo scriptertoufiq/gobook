@@ -1,8 +1,8 @@
 package resources
 
 import (
-	"github.com/scriptertoufiq/go-mvc/internal/models"
-	"github.com/scriptertoufiq/go-mvc/internal/services"
+	"github.com/scriptertoufiq/gobook/internal/models"
+	"github.com/scriptertoufiq/gobook/internal/services"
 )
 
 // ReactionResource is how a post's reactions appear on the wire.

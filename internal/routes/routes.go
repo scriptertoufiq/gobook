@@ -8,9 +8,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/scriptertoufiq/go-mvc/internal/container"
-	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
-	"github.com/scriptertoufiq/go-mvc/pkg/response"
+	"github.com/scriptertoufiq/gobook/internal/container"
+	"github.com/scriptertoufiq/gobook/pkg/apperror"
+	"github.com/scriptertoufiq/gobook/pkg/response"
 )
 
 // Register mounts every route on the engine.

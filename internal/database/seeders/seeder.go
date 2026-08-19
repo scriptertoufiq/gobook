@@ -9,8 +9,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/scriptertoufiq/go-mvc/internal/models"
-	"github.com/scriptertoufiq/go-mvc/pkg/hash"
+	"github.com/scriptertoufiq/gobook/internal/models"
+	"github.com/scriptertoufiq/gobook/pkg/hash"
 )
 
 // seeders runs in slice order, so a seeder may depend on the ones above it.

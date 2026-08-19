@@ -8,12 +8,12 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/scriptertoufiq/go-mvc/internal/models"
-	"github.com/scriptertoufiq/go-mvc/internal/requests"
-	"github.com/scriptertoufiq/go-mvc/internal/services"
-	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
-	"github.com/scriptertoufiq/go-mvc/pkg/hash"
-	"github.com/scriptertoufiq/go-mvc/pkg/pagination"
+	"github.com/scriptertoufiq/gobook/internal/models"
+	"github.com/scriptertoufiq/gobook/internal/requests"
+	"github.com/scriptertoufiq/gobook/internal/services"
+	"github.com/scriptertoufiq/gobook/pkg/apperror"
+	"github.com/scriptertoufiq/gobook/pkg/hash"
+	"github.com/scriptertoufiq/gobook/pkg/pagination"
 )
 
 // fakeUserRepo is an in-memory stand-in for the real repository. Because the

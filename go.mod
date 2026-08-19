@@ -1,4 +1,4 @@
-module github.com/scriptertoufiq/go-mvc
+module github.com/scriptertoufiq/gobook
 
 go 1.25.0
 

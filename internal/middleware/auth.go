@@ -8,9 +8,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
-	"github.com/scriptertoufiq/go-mvc/pkg/jwt"
-	"github.com/scriptertoufiq/go-mvc/pkg/response"
+	"github.com/scriptertoufiq/gobook/pkg/apperror"
+	"github.com/scriptertoufiq/gobook/pkg/jwt"
+	"github.com/scriptertoufiq/gobook/pkg/response"
 )
 
 // Context keys set by Auth and read by downstream handlers.

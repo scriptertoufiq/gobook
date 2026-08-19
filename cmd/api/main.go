@@ -4,7 +4,7 @@ package main
 import (
 	"log"
 
-	"github.com/scriptertoufiq/go-mvc/internal/app"
+	"github.com/scriptertoufiq/gobook/internal/app"
 )
 
 func main() {

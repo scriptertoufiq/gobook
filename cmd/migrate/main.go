@@ -18,9 +18,9 @@ import (
 	"flag"
 	"log"
 
-	"github.com/scriptertoufiq/go-mvc/config"
-	"github.com/scriptertoufiq/go-mvc/internal/database"
-	"github.com/scriptertoufiq/go-mvc/internal/database/seeders"
+	"github.com/scriptertoufiq/gobook/config"
+	"github.com/scriptertoufiq/gobook/internal/database"
+	"github.com/scriptertoufiq/gobook/internal/database/seeders"
 )
 
 func main() {

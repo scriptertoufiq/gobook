@@ -8,16 +8,16 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"gorm.io/gorm"
 
-	"github.com/scriptertoufiq/go-mvc/internal/cachekeys"
-	"github.com/scriptertoufiq/go-mvc/internal/listeners"
-	"github.com/scriptertoufiq/go-mvc/internal/models"
-	"github.com/scriptertoufiq/go-mvc/internal/repositories"
-	"github.com/scriptertoufiq/go-mvc/internal/requests"
-	"github.com/scriptertoufiq/go-mvc/internal/services"
-	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
-	"github.com/scriptertoufiq/go-mvc/pkg/cache"
-	"github.com/scriptertoufiq/go-mvc/pkg/events"
-	"github.com/scriptertoufiq/go-mvc/pkg/pagination"
+	"github.com/scriptertoufiq/gobook/internal/cachekeys"
+	"github.com/scriptertoufiq/gobook/internal/listeners"
+	"github.com/scriptertoufiq/gobook/internal/models"
+	"github.com/scriptertoufiq/gobook/internal/repositories"
+	"github.com/scriptertoufiq/gobook/internal/requests"
+	"github.com/scriptertoufiq/gobook/internal/services"
+	"github.com/scriptertoufiq/gobook/pkg/apperror"
+	"github.com/scriptertoufiq/gobook/pkg/cache"
+	"github.com/scriptertoufiq/gobook/pkg/events"
+	"github.com/scriptertoufiq/gobook/pkg/pagination"
 )
 
 // fakePostRepo is an in-memory stand-in that counts reads, which is how these

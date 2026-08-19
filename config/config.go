@@ -164,7 +164,7 @@ func Load() *Config {
 
 	return &Config{
 		App: AppConfig{
-			Name: env("APP_NAME", "go-mvc"),
+			Name: env("APP_NAME", "GoBook"),
 			// Defaults to production, not local: an unset APP_ENV is far more
 			// likely to be a deploy that forgot to set it than a developer who
 			// skipped `make setup`. The safe answer costs a developer one line
@@ -190,7 +190,7 @@ func Load() *Config {
 		},
 		JWT: JWTConfig{
 			Secret:     env("JWT_SECRET", ""),
-			Issuer:     env("JWT_ISSUER", "go-mvc"),
+			Issuer:     env("JWT_ISSUER", "gobook"),
 			AccessTTL:  time.Duration(envInt("JWT_ACCESS_TTL", 15)) * time.Minute,
 			RefreshTTL: time.Duration(envInt("JWT_REFRESH_TTL", 720)) * time.Hour,
 		},
@@ -209,7 +209,7 @@ func Load() *Config {
 			Username:    env("MAIL_USERNAME", ""),
 			Password:    env("MAIL_PASSWORD", ""),
 			FromAddress: env("MAIL_FROM_ADDRESS", ""),
-			FromName:    env("MAIL_FROM_NAME", "go-mvc"),
+			FromName:    env("MAIL_FROM_NAME", "GoBook"),
 		},
 		Redis: RedisConfig{
 			Enabled:     envBool("REDIS_ENABLED", false),
@@ -218,7 +218,7 @@ func Load() *Config {
 			Username:    env("REDIS_USERNAME", ""),
 			Password:    env("REDIS_PASSWORD", ""),
 			DB:          envInt("REDIS_DB", 0),
-			Prefix:      env("REDIS_PREFIX", "go-mvc"),
+			Prefix:      env("REDIS_PREFIX", "gobook"),
 			DialTimeout: time.Duration(envInt("REDIS_DIAL_TIMEOUT", 5)) * time.Second,
 			Timeout:     time.Duration(envInt("REDIS_TIMEOUT", 3)) * time.Second,
 			PoolSize:    envInt("REDIS_POOL_SIZE", 10),

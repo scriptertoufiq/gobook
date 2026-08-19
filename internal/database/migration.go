@@ -7,7 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/scriptertoufiq/go-mvc/internal/database/migrations"
+	"github.com/scriptertoufiq/gobook/internal/database/migrations"
 )
 
 // This file is the thin, logging wrapper the CLI talks to. The schema history

@@ -7,7 +7,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 
-	"github.com/scriptertoufiq/go-mvc/pkg/cache"
+	"github.com/scriptertoufiq/gobook/pkg/cache"
 )
 
 // A zero TTL must store the value with no expiry at all — not with an

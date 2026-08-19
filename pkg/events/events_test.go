@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/scriptertoufiq/go-mvc/pkg/events"
+	"github.com/scriptertoufiq/gobook/pkg/events"
 )
 
 type thingHappened struct{ Value string }

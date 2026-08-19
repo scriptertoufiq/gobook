@@ -7,12 +7,12 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 
-	"github.com/scriptertoufiq/go-mvc/internal/cachekeys"
-	appevents "github.com/scriptertoufiq/go-mvc/internal/events"
-	"github.com/scriptertoufiq/go-mvc/internal/listeners"
-	"github.com/scriptertoufiq/go-mvc/internal/models"
-	"github.com/scriptertoufiq/go-mvc/pkg/cache"
-	"github.com/scriptertoufiq/go-mvc/pkg/events"
+	"github.com/scriptertoufiq/gobook/internal/cachekeys"
+	appevents "github.com/scriptertoufiq/gobook/internal/events"
+	"github.com/scriptertoufiq/gobook/internal/listeners"
+	"github.com/scriptertoufiq/gobook/internal/models"
+	"github.com/scriptertoufiq/gobook/pkg/cache"
+	"github.com/scriptertoufiq/gobook/pkg/events"
 )
 
 func newListener(t *testing.T) (*events.Dispatcher, cache.Cache, *miniredis.Miniredis) {

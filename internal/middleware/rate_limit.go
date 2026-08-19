@@ -7,9 +7,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
-	"github.com/scriptertoufiq/go-mvc/pkg/ratelimit"
-	"github.com/scriptertoufiq/go-mvc/pkg/response"
+	"github.com/scriptertoufiq/gobook/pkg/apperror"
+	"github.com/scriptertoufiq/gobook/pkg/ratelimit"
+	"github.com/scriptertoufiq/gobook/pkg/response"
 )
 
 // RateLimit throttles requests per caller. A nil limiter is a pass-through, so

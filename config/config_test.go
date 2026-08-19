@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/scriptertoufiq/go-mvc/config"
+	"github.com/scriptertoufiq/gobook/config"
 )
 
 // Debug returns panic detail to clients and logs every query. A deploy that

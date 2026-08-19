@@ -3,7 +3,7 @@ package resources
 import (
 	"time"
 
-	"github.com/scriptertoufiq/go-mvc/internal/models"
+	"github.com/scriptertoufiq/gobook/internal/models"
 )
 
 // PostResource is the API shape of a post. Going through an explicit struct

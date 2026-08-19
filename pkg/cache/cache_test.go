@@ -8,7 +8,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 
-	"github.com/scriptertoufiq/go-mvc/pkg/cache"
+	"github.com/scriptertoufiq/gobook/pkg/cache"
 )
 
 type post struct {

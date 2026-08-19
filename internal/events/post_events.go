@@ -2,7 +2,7 @@
 // pkg/events; these are the messages that travel on it.
 package events
 
-import "github.com/scriptertoufiq/go-mvc/internal/models"
+import "github.com/scriptertoufiq/gobook/internal/models"
 
 // Event names. Constants rather than literals so a typo is a compile error
 // instead of a listener that silently never fires.

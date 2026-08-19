@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/scriptertoufiq/go-mvc/pkg/apperror"
+	"github.com/scriptertoufiq/gobook/pkg/apperror"
 )
 
 // uintParam reads a positive integer route parameter, e.g. the :id in /users/:id.

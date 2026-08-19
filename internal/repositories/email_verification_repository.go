@@ -6,7 +6,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/scriptertoufiq/go-mvc/internal/models"
+	"github.com/scriptertoufiq/gobook/internal/models"
 )
 
 type EmailVerificationRepository interface {
