@@ -18,6 +18,33 @@ import (
 // scanBatch is how many pending entries are read per SSCAN round trip.
 const scanBatch = 512
 
+// claimScript moves at most ARGV[1] pending entries into a claimed batch.
+//
+// Bounded, and that is the whole point. Taking everything pending is fine while
+// the flusher keeps up and catastrophic when it does not: after an outage the
+// pending set holds however much accumulated, and one claim would then try to
+// hold all of it in memory, pipeline an HGET for every entry, and write it in a
+// single transaction that cannot finish inside the timeout — so it rolls back
+// and the next tick attempts exactly the same thing. A backlog would never
+// drain. A capped claim turns that into several ordinary flushes.
+//
+// SPOP and SADD together, so the entries are never in neither set: they are
+// claimed atomically and stay claimed until the database write commits.
+var claimScript = redis.NewScript(`
+local members = redis.call('SPOP', KEYS[1], tonumber(ARGV[1]))
+if #members == 0 then
+  return 0
+end
+
+-- unpack has a stack limit, so hand them over in slices.
+for i = 1, #members, 500 do
+  local last = math.min(i + 499, #members)
+  redis.call('SADD', KEYS[2], unpack(members, i, last))
+end
+
+return #members
+`)
+
 // parsePair reverses the "postID:userID" token used in the pending set.
 func parsePair(token string) (repositories.PostUser, error) {
 	postRaw, userRaw, ok := strings.Cut(token, ":")
@@ -50,34 +77,53 @@ type Batch struct {
 
 	// Deletes are people who took theirs back.
 	Deletes []repositories.PostUser
+
+	// Full reports that the claim hit its limit, so more is probably pending.
+	Full bool
 }
+
+// DefaultClaimLimit caps how many pending writes one flush takes on.
+//
+// Small enough that the batch fits comfortably in memory, in one pipeline and
+// in one transaction; large enough that a busy app still moves thousands of
+// reactions a second across a few cycles.
+const DefaultClaimLimit = 2000
 
 func (b Batch) Len() int { return len(b.Upserts) + len(b.Deletes) }
 
-// Claim moves the pending set aside and resolves every pair to its current value.
+// Claim moves up to limit pending entries into a batch and resolves each to
+// its current value.
 //
-// RENAME rather than SPOP, and it is the difference between a recoverable
-// flush and a lossy one. Renaming hands the batch over atomically — new
-// reactions immediately start filling a fresh set — while leaving the claimed
-// one intact, so a crash before the database write loses nothing. Popping
-// would take the entries out of Redis before MySQL had them.
-//
-// Returns an empty batch and no error when there is nothing pending.
-func (s *Store) Claim(ctx context.Context, runID string) (Batch, error) {
-	from := s.key(cachekeys.ReactionDirty())
-	to := s.key(cachekeys.ReactionFlushing(runID))
-
-	if err := s.client.Rename(ctx, from, to).Err(); err != nil {
-		// An empty queue is the common case, and RENAME reports it as a plain
-		// "ERR no such key" rather than redis.Nil — so it has to be matched on
-		// the message. Treating it as a fault would log an error every idle tick.
-		if errors.Is(err, redis.Nil) || strings.Contains(err.Error(), "no such key") {
-			return Batch{}, nil
-		}
-		return Batch{}, fmt.Errorf("reactions: claim pending set: %w", err)
+// Returns an empty batch and no error when there is nothing pending. The
+// entries stay in the claimed set until Release, so a crash before the database
+// write loses nothing — the orphan scan finds them at the next start.
+func (s *Store) Claim(ctx context.Context, runID string, limit int) (Batch, error) {
+	if limit <= 0 {
+		limit = DefaultClaimLimit
 	}
 
-	return s.resolve(ctx, runID)
+	claimed, err := claimScript.Run(ctx, s.client,
+		[]string{
+			s.key(cachekeys.ReactionDirty()),
+			s.key(cachekeys.ReactionFlushing(runID)),
+		},
+		limit).Int64()
+	if err != nil {
+		return Batch{}, fmt.Errorf("reactions: claim pending writes: %w", err)
+	}
+	if claimed == 0 {
+		return Batch{}, nil
+	}
+
+	batch, err := s.resolve(ctx, runID)
+	if err != nil {
+		return Batch{}, err
+	}
+
+	// Full means there is very likely more waiting, which the caller uses to
+	// keep draining instead of sleeping until the next tick.
+	batch.Full = claimed >= int64(limit)
+	return batch, nil
 }
 
 // resolve reads the current value of every pair in a claimed set and sorts

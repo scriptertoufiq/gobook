@@ -180,9 +180,11 @@ func Build(db *gorm.DB, cfg *config.Config) (*Container, error) {
 	startTokenSweeper(refreshTokenRepo, stopBackground)
 
 	if reactionStore != nil {
-		reactions.NewFlusher(reactionStore, reactionRepo, db, cfg.Redis.ReactionFlushInterval).
+		reactions.NewFlusher(reactionStore, reactionRepo, db,
+			cfg.Redis.ReactionFlushInterval, cfg.Redis.ReactionFlushBatch).
 			Start(stopBackground)
-		log.Printf("reactions: flushing to the database every %s", cfg.Redis.ReactionFlushInterval)
+		log.Printf("reactions: flushing to the database every %s, up to %d write(s) per batch",
+			cfg.Redis.ReactionFlushInterval, cfg.Redis.ReactionFlushBatch)
 	}
 
 	// Controllers

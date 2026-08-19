@@ -25,6 +25,15 @@ type Flusher struct {
 
 	interval time.Duration
 	timeout  time.Duration
+
+	// limit caps one claim. A backlog is drained across several claims rather
+	// than attempted as one.
+	limit int
+
+	// maxCycles bounds how many claims a single tick will chase before
+	// yielding. Without it a sustained backlog would keep one tick running
+	// indefinitely and never observe the stop signal.
+	maxCycles int
 }
 
 func NewFlusher(
@@ -32,9 +41,13 @@ func NewFlusher(
 	repo repositories.ReactionRepository,
 	db *gorm.DB,
 	interval time.Duration,
+	batch int,
 ) *Flusher {
 	if interval <= 0 {
 		interval = 10 * time.Second
+	}
+	if batch <= 0 {
+		batch = DefaultClaimLimit
 	}
 
 	return &Flusher{
@@ -44,7 +57,10 @@ func NewFlusher(
 		interval: interval,
 		// Generous next to the interval: a slow batch should finish rather
 		// than be abandoned and retried, which would only make the queue longer.
-		timeout: 30 * time.Second,
+		// It is a ceiling on a bounded batch now, not on an unbounded one.
+		timeout:   30 * time.Second,
+		limit:     batch,
+		maxCycles: 25,
 	}
 }
 
@@ -74,24 +90,47 @@ func (f *Flusher) Start(stop <-chan struct{}) {
 	}()
 }
 
-// tick claims whatever is pending and writes it.
+// tick drains pending writes, a bounded batch at a time.
+//
+// It keeps going while each claim comes back full, so a backlog is worked
+// through at once rather than one batch per interval — after an outage that is
+// the difference between catching up in seconds and never catching up at all.
+// maxCycles stops a sustained flood from monopolising the goroutine.
 func (f *Flusher) tick() {
+	for cycle := 0; cycle < f.maxCycles; cycle++ {
+		full, err := f.drainOnce()
+		if err != nil || !full {
+			return
+		}
+	}
+
+	// Still full after maxCycles: the write rate is outpacing the flusher, and
+	// that is worth knowing before the pending set becomes the problem.
+	if pending, err := f.store.Pending(context.Background()); err == nil && pending > 0 {
+		log.Printf("reactions: still %d write(s) pending after a full drain cycle — "+
+			"the flusher is falling behind", pending)
+	}
+}
+
+// drainOnce claims one batch and writes it, reporting whether the claim was
+// full — which means more is very likely waiting.
+func (f *Flusher) drainOnce() (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), f.timeout)
 	defer cancel()
 
 	runID, err := newRunID()
 	if err != nil {
 		log.Printf("reactions: could not name a flush run: %v", err)
-		return
+		return false, err
 	}
 
-	batch, err := f.store.Claim(ctx, runID)
+	batch, err := f.store.Claim(ctx, runID, f.limit)
 	if err != nil {
 		log.Printf("reactions: claiming pending writes failed: %v", err)
-		return
+		return false, err
 	}
 	if batch.Len() == 0 {
-		return
+		return false, nil
 	}
 
 	if err := f.write(ctx, batch); err != nil {
@@ -99,11 +138,13 @@ func (f *Flusher) tick() {
 		// that these writes are outstanding, and recover() will find it.
 		log.Printf("reactions: flush %s failed, %d write(s) held for retry: %v",
 			runID, batch.Len(), err)
-		return
+		return false, err
 	}
 
 	log.Printf("reactions: flushed %d upsert(s) and %d removal(s)",
 		len(batch.Upserts), len(batch.Deletes))
+
+	return batch.Full, nil
 }
 
 // write persists a batch and only then forgets it.

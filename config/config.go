@@ -55,6 +55,15 @@ type RedisConfig struct {
 	// reclaims the memory.
 	CommentTTL time.Duration
 
+	// ReactionFlushBatch caps how many pending reactions one flush takes on.
+	//
+	// A cap, not a target: it bounds the memory, the pipeline and the
+	// transaction of a single batch, and a backlog is drained across several
+	// of them rather than attempted as one. Without it, recovering from an
+	// outage means a batch too large to finish inside the timeout, rolled back
+	// and retried identically forever.
+	ReactionFlushBatch int
+
 	// ReactionFlushInterval is how often reactions held in Redis are written
 	// to MySQL. It is also the size of the window in which a Redis failure
 	// loses reactions, so it is short by default.
@@ -235,6 +244,7 @@ func Load() *Config {
 			// "never expire" rather than being mistaken for an absent value.
 			PostTTL:               cacheTTL("CACHE_POST_TTL", envInt("CACHE_DEFAULT_TTL", 300)),
 			CommentTTL:            commentTTL(),
+			ReactionFlushBatch:    envInt("REACTION_FLUSH_BATCH", 2000),
 			ReactionFlushInterval: time.Duration(envInt("REACTION_FLUSH_INTERVAL", 10)) * time.Second,
 		},
 		DB: DBConfig{
