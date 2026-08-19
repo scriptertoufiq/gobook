@@ -60,6 +60,21 @@ export interface Reactions {
   applied: boolean
 }
 
+/** Mirrors internal/resources.CommentResource. */
+export interface Comment {
+  id: number
+  post_id: number
+  user_id: number
+  /** null for a comment on a post; set for a reply. */
+  parent_id: number | null
+  body: string
+  /** How many replies hang off this one. Always 0 on a reply. */
+  reply_count: number
+  edited: boolean
+  created_at: string
+  updated_at: string
+}
+
 /** Mirrors internal/resources.PostResource. */
 export interface Post {
   id: number
@@ -69,6 +84,8 @@ export interface Post {
   created_at: string
   updated_at: string
   reactions: Reactions
+  /** The whole conversation under this post, replies included. */
+  comment_count: number
 }
 
 export interface TokenPair {

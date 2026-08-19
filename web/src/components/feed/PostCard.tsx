@@ -125,6 +125,11 @@ export function PostCard({
         <>
           <div className="flex items-center justify-between px-3 pb-2 text-xs text-slate-500 dark:text-slate-400">
             <ReactionSummary value={post.reactions} />
+            {post.comment_count > 0 && (
+              <Link to={`/posts/${post.id}`} className="hover:underline">
+                {post.comment_count} {post.comment_count === 1 ? 'comment' : 'comments'}
+              </Link>
+            )}
           </div>
 
           <footer className="flex border-t border-slate-200 p-1 dark:border-slate-800">
@@ -141,6 +146,9 @@ export function PostCard({
             >
               <CommentIcon />
               Comment
+              {post.comment_count > 0 && (
+                <span className="tabular-nums">{post.comment_count}</span>
+              )}
             </Link>
             <Action icon={<ShareIcon />} label="Share" />
           </footer>

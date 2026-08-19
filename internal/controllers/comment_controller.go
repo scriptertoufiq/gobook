@@ -83,6 +83,7 @@ func (ctrl *CommentController) Store(c *gin.Context) {
 		return
 	}
 
+	// Zero is correct here: it was created a moment ago.
 	response.Created(c, resources.NewCommentResource(comment, 0))
 }
 
@@ -116,6 +117,7 @@ func (ctrl *CommentController) Reply(c *gin.Context) {
 		return
 	}
 
+	// Zero is correct here: replies cannot themselves be replied to.
 	response.Created(c, resources.NewCommentResource(reply, 0))
 }
 
@@ -145,7 +147,11 @@ func (ctrl *CommentController) Update(c *gin.Context) {
 		return
 	}
 
-	response.OK(c, resources.NewCommentResource(comment, 0))
+	// Not zero: an edited comment keeps whatever replies it had, and reporting
+	// none would hide the control that opens them.
+	replies := ctrl.service.ReplyCount(c.Request.Context(), comment.ID)
+
+	response.OK(c, resources.NewCommentResource(comment, replies))
 }
 
 // Destroy handles DELETE /api/v1/comments/:id — the author only. Deleting a

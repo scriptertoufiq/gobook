@@ -4,6 +4,7 @@ import { deletePost, getPost, type PostWithSource } from '../api/posts'
 import { useAuth } from '../auth/context'
 import { Avatar } from '../components/Avatar'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { CommentThread } from '../components/comments/CommentThread'
 import { PostEditor } from '../components/feed/PostEditor'
 import { ReactionButton, ReactionSummary } from '../components/feed/ReactionBar'
 import { GlobeIcon } from '../components/icons'
@@ -241,6 +242,25 @@ export function PostDetail() {
 
       {/* The API tells us whether Redis or MySQL answered. Surfacing it makes
           the cache observable from the page it serves. */}
+      {/* The conversation, below the post it belongs to. */}
+      {!editing && (
+        <Card>
+          <CommentThread
+            postID={post.id}
+            total={post.comment_count}
+            onChanged={() => {
+              // Re-read the post so the count on screen is the server's, not a
+              // guess — deleting a comment takes its replies with it.
+              void getPost(post.id)
+                .then((fresh) => setResult(fresh))
+                .catch(() => {
+                  // Leaving the previous count is better than blanking it.
+                })
+            }}
+          />
+        </Card>
+      )}
+
       <ConfirmDialog
         open={confirming}
         busy={deleting}

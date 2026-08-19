@@ -306,6 +306,20 @@ func (s *CommentService) Delete(ctx context.Context, id, callerID uint) error {
 	return nil
 }
 
+// ReplyCount is how many replies hang off one comment.
+//
+// Needed when a single comment is returned on its own — editing one must not
+// report it as having no replies, which would take the "view replies" control
+// off the screen until the next full read.
+func (s *CommentService) ReplyCount(ctx context.Context, commentID uint) int64 {
+	counts, err := s.repo.ReplyCounts(ctx, []uint{commentID})
+	if err != nil {
+		log.Printf("comments: could not count replies of %d: %v", commentID, err)
+		return 0
+	}
+	return counts[commentID]
+}
+
 // CountsForPosts totals the conversation under each post, for a feed.
 func (s *CommentService) CountsForPosts(ctx context.Context, postIDs []uint) (map[uint]int64, error) {
 	counts, err := s.repo.CountsForPosts(ctx, postIDs)
