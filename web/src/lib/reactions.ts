@@ -1,14 +1,11 @@
 /**
- * Reactions — frontend only.
- *
- * There is no reactions endpoint, so a choice is stored in this browser and
- * nowhere else: it survives a reload, but nobody else can see it and it does
- * not follow you to another device. That is a deliberate limit of doing this
- * without a backend, not an oversight — when an API exists, `reactionStore`
- * below is the one module that has to change.
+ * How each reaction is presented. The keys themselves come from types/api,
+ * where they mirror the set the server accepts.
  */
 
-export type ReactionKey = 'like' | 'love' | 'care' | 'sad' | 'angry'
+import type { ReactionKey } from '../types/api'
+
+export type { ReactionKey }
 
 export interface Reaction {
   key: ReactionKey

@@ -173,12 +173,18 @@ func Build(db *gorm.DB, cfg *config.Config) (*Container, error) {
 	stopBackground := make(chan struct{})
 	startTokenSweeper(refreshTokenRepo, stopBackground)
 
+	if reactionStore != nil {
+		reactions.NewFlusher(reactionStore, reactionRepo, db, cfg.Redis.ReactionFlushInterval).
+			Start(stopBackground)
+		log.Printf("reactions: flushing to the database every %s", cfg.Redis.ReactionFlushInterval)
+	}
+
 	// Controllers
 	return &Container{
 		Health:   controllers.NewHealthController(db, cacheStore, cfg.App.Name),
 		Auth:     controllers.NewAuthController(authService, userService),
 		User:     controllers.NewUserController(userService),
-		Post:     controllers.NewPostController(postService),
+		Post:     controllers.NewPostController(postService, reactionService),
 		Reaction: controllers.NewReactionController(reactionService),
 		// codegen:controllers
 

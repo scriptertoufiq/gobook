@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { getReactions } from '../../api/reactions'
 import { listPosts } from '../../api/posts'
 import { toFormError } from '../../lib/errors'
+import { watchConnection } from '../../lib/reactionStore'
 import type { Post } from '../../types/api'
 import { Alert, Button } from '../ui'
 import { Composer } from './Composer'
@@ -72,23 +74,28 @@ export function Feed({ name }: { name: string }) {
     void load(1)
   }, [load])
 
-  // Extend as the sentinel comes into view.
-  useEffect(() => {
-    const node = sentinel.current
-    if (!node || !hasMore || error) return
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) void load(page + 1)
-      },
-      // Start fetching before the sentinel is actually visible, so the next
-      // page is usually there by the time the reader arrives.
-      { rootMargin: '400px' },
-    )
-
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [hasMore, page, load, error])
+  // Anything reacted to while the connection was down is delivered as soon as
+  // it returns. Only the posts the queue actually settled are re-read — the
+  // server may have resolved a conflict differently from the optimistic guess
+  // still on screen.
+  useEffect(
+    () =>
+      watchConnection((postIDs) => {
+        postIDs.forEach((id) => {
+          void getReactions(id)
+            .then((reactions) =>
+              setPosts((current) =>
+                current.map((p) => (p.id === id ? { ...p, reactions } : p)),
+              ),
+            )
+            .catch(() => {
+              // A refresh that fails leaves the optimistic tally in place,
+              // which is still the best guess available.
+            })
+        })
+      }),
+    [],
+  )
 
   function prepend(post: Post) {
     setPosts((current) => [post, ...current])

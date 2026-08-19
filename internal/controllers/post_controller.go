@@ -16,11 +16,18 @@ import (
 )
 
 type PostController struct {
-	service *services.PostService
+	service   *services.PostService
+	reactions *services.ReactionService
 }
 
-func NewPostController(service *services.PostService) *PostController {
-	return &PostController{service: service}
+func NewPostController(service *services.PostService, reactions *services.ReactionService) *PostController {
+	return &PostController{service: service, reactions: reactions}
+}
+
+// viewer is the caller's id, or 0 when there is none.
+func viewer(c *gin.Context) uint {
+	id, _ := middleware.CurrentUserID(c)
+	return id
 }
 
 // Index handles GET /api/v1/posts
@@ -47,7 +54,25 @@ func (ctrl *PostController) Index(c *gin.Context) {
 		return
 	}
 
-	response.Paginated(c, resources.NewPostCollection(posts), meta)
+	collection := resources.NewPostCollection(posts)
+
+	// Tallies are attached here rather than inside the resource, so the post
+	// layer stays unaware that reactions exist at all.
+	if ctrl.reactions != nil {
+		ids := make([]uint, 0, len(posts))
+		for i := range posts {
+			ids = append(ids, posts[i].ID)
+		}
+
+		summaries := ctrl.reactions.SummariseMany(c.Request.Context(), ids, viewer(c))
+		for i := range collection {
+			if summary, ok := summaries[collection[i].ID]; ok {
+				collection[i] = collection[i].WithReactions(resources.NewReactionResource(summary))
+			}
+		}
+	}
+
+	response.Paginated(c, collection, meta)
 }
 
 // Show handles GET /api/v1/posts/:id
@@ -71,8 +96,16 @@ func (ctrl *PostController) Show(c *gin.Context) {
 		return
 	}
 
+	resource := resources.NewPostResource(post)
+
+	if ctrl.reactions != nil {
+		if summary, err := ctrl.reactions.Summary(c.Request.Context(), id, viewer(c)); err == nil {
+			resource = resource.WithReactions(resources.NewReactionResource(summary))
+		}
+	}
+
 	c.Header("X-Cache", cacheHeader(source))
-	response.OKWithMessage(c, resources.NewPostResource(post), sourceMessage(source))
+	response.OKWithMessage(c, resource, sourceMessage(source))
 }
 
 // cacheHeader renders the source as the conventional HIT/MISS token.

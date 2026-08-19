@@ -47,6 +47,11 @@ type RedisConfig struct {
 	// reproduce, so the cache should forget quickly until proven otherwise.
 	DefaultTTL time.Duration
 
+	// ReactionFlushInterval is how often reactions held in Redis are written
+	// to MySQL. It is also the size of the window in which a Redis failure
+	// loses reactions, so it is short by default.
+	ReactionFlushInterval time.Duration
+
 	// PostTTL overrides DefaultTTL for cached posts.
 	//
 	// Zero means the entries never expire. That is safe only because the post
@@ -220,7 +225,8 @@ func Load() *Config {
 			DefaultTTL:  time.Duration(envInt("CACHE_DEFAULT_TTL", 300)) * time.Second,
 			// -1 is the "not configured" sentinel, so an explicit 0 can mean
 			// "never expire" rather than being mistaken for an absent value.
-			PostTTL: cacheTTL("CACHE_POST_TTL", envInt("CACHE_DEFAULT_TTL", 300)),
+			PostTTL:               cacheTTL("CACHE_POST_TTL", envInt("CACHE_DEFAULT_TTL", 300)),
+			ReactionFlushInterval: time.Duration(envInt("REACTION_FLUSH_INTERVAL", 10)) * time.Second,
 		},
 		DB: DBConfig{
 			Host:            env("DB_HOST", "127.0.0.1"),

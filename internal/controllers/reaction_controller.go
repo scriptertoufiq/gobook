@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -65,7 +66,7 @@ func (ctrl *ReactionController) Set(c *gin.Context) {
 		return
 	}
 
-	summary, err := ctrl.service.Set(c.Request.Context(), postID, userID, req.Type)
+	summary, err := ctrl.service.Set(c.Request.Context(), postID, userID, req.Type, req.When())
 	if err != nil {
 		response.Error(c, err)
 		return
@@ -95,7 +96,17 @@ func (ctrl *ReactionController) Remove(c *gin.Context) {
 		return
 	}
 
-	summary, err := ctrl.service.Remove(c.Request.Context(), postID, userID)
+	// DELETE carries no body, so a replayed removal states its time in the
+	// query string. Anything unparseable is treated as "now", which is what an
+	// ordinary request means anyway.
+	var actedAt time.Time
+	if raw := c.Query("acted_at"); raw != "" {
+		if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+			actedAt = parsed
+		}
+	}
+
+	summary, err := ctrl.service.Remove(c.Request.Context(), postID, userID, actedAt)
 	if err != nil {
 		response.Error(c, err)
 		return

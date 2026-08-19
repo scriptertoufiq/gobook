@@ -1,24 +1,39 @@
 import { useEffect, useRef, useState } from 'react'
-import { reactionFor, reactions, type ReactionKey } from '../../lib/reactions'
-import { getReaction, subscribe, toggleReaction } from '../../lib/reactionStore'
+import { removeReaction, setReaction } from '../../api/reactions'
+import { reactionFor, reactions } from '../../lib/reactions'
+import { dequeue, enqueue, isTransportFailure, queued, subscribe } from '../../lib/reactionStore'
+import type { Reactions, ReactionKey } from '../../types/api'
 import { LikeIcon } from '../icons'
 
 /**
- * The reaction control: a button showing your current choice, and a picker.
+ * The reaction control.
  *
- * Opening on click rather than hover alone — hover pickers are unreachable by
- * keyboard and unusable on touch. Hover still opens it on a pointer device,
- * because that is the interaction people expect from a feed.
+ * The tally comes from the post payload; a click goes to the server and the
+ * response replaces it. The UI updates first and reconciles after, so the
+ * button never feels like it is waiting on a round trip.
+ *
+ * When the request cannot reach the server the click is parked in the outbox
+ * and the optimistic state stays on screen, marked as pending — the person
+ * reacted, and as far as they are concerned it happened.
  */
-export function ReactionButton({ postID }: { postID: number }) {
-  const [current, setCurrent] = useState<ReactionKey | null>(() => getReaction(postID))
+export function ReactionButton({
+  postID,
+  value,
+  onChange,
+}: {
+  postID: number
+  value: Reactions
+  onChange: (next: Reactions) => void
+}) {
   const [open, setOpen] = useState(false)
+  const [waiting, setWaiting] = useState(false)
+  const [isQueued, setIsQueued] = useState(() => queued(postID) !== null)
+
   const wrapper = useRef<HTMLDivElement>(null)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Keep every card for this post in step — the feed and the detail page can
-  // both be mounted across a navigation.
-  useEffect(() => subscribe(() => setCurrent(getReaction(postID))), [postID])
+  // The outbox drains on its own; when this post's entry clears, drop the badge.
+  useEffect(() => subscribe(() => setIsQueued(queued(postID) !== null)), [postID])
 
   useEffect(() => {
     if (!open) return
@@ -38,14 +53,53 @@ export function ReactionButton({ postID }: { postID: number }) {
     }
   }, [open])
 
-  // Clear any pending close when the component goes away mid-hover.
   useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current) }, [])
 
-  const active = reactionFor(current)
+  const active = reactionFor(value.mine)
 
-  function choose(key: ReactionKey) {
-    setCurrent(toggleReaction(postID, key))
+  /** What the tally looks like with this change applied, before the server answers. */
+  function predict(next: ReactionKey | null): Reactions {
+    const counts = { ...value.counts }
+    const previous = value.mine
+
+    if (previous) counts[previous] = Math.max((counts[previous] ?? 1) - 1, 0)
+    if (next) counts[next] = (counts[next] ?? 0) + 1
+
+    for (const key of Object.keys(counts) as ReactionKey[]) {
+      if (!counts[key]) delete counts[key]
+    }
+
+    const total = Object.values(counts).reduce((sum, n) => sum + (n ?? 0), 0)
+    return { counts, total, mine: next, applied: true }
+  }
+
+  async function choose(key: ReactionKey) {
     setOpen(false)
+
+    // Tapping the held reaction takes it back.
+    const next = value.mine === key ? null : key
+
+    onChange(predict(next))
+    setWaiting(true)
+
+    try {
+      const settled = next === null ? await removeReaction(postID) : await setReaction(postID, next)
+
+      onChange(settled)
+      dequeue(postID) // a delivered click supersedes anything parked for this post
+      setIsQueued(false)
+    } catch (err) {
+      if (isTransportFailure(err)) {
+        // Never reached the server. Keep what the person sees and deliver later.
+        enqueue(postID, next)
+        setIsQueued(true)
+      } else {
+        // Refused. Put the tally back to what the server last told us.
+        onChange(value)
+      }
+    } finally {
+      setWaiting(false)
+    }
   }
 
   function openNow() {
@@ -54,36 +108,36 @@ export function ReactionButton({ postID }: { postID: number }) {
   }
 
   function closeSoon() {
-    // A grace period, so moving the pointer from the button to the picker does
-    // not close it on the way.
     closeTimer.current = setTimeout(() => setOpen(false), 250)
   }
 
   return (
-    <div
-      ref={wrapper}
-      className="relative flex-1"
-      onMouseEnter={openNow}
-      onMouseLeave={closeSoon}
-    >
+    <div ref={wrapper} className="relative flex-1" onMouseEnter={openNow} onMouseLeave={closeSoon}>
       <button
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
+        disabled={waiting}
         aria-label={active ? `Your reaction: ${active.label}. Change or remove it.` : 'React to this post'}
-        onClick={() => (active ? choose(active.key) : setOpen((v) => !v))}
+        onClick={() => (active ? void choose(active.key) : setOpen((v) => !v))}
         className={`flex w-full items-center justify-center gap-2 rounded-lg py-2 text-sm
-          font-semibold transition hover:bg-slate-100 dark:hover:bg-slate-800
+          font-semibold transition hover:bg-slate-100 disabled:opacity-60
+          dark:hover:bg-slate-800
           ${active ? active.tone : 'text-slate-600 dark:text-slate-400'}`}
       >
         {active ? (
-          <span aria-hidden="true" className="text-base leading-none">
-            {active.emoji}
-          </span>
+          <span aria-hidden="true" className="text-base leading-none">{active.emoji}</span>
         ) : (
           <LikeIcon />
         )}
         {active ? active.label : 'Like'}
+        {isQueued && (
+          <span
+            title="Saved on this device — will sync when the connection returns"
+            className="ml-0.5 h-1.5 w-1.5 rounded-full bg-amber-500"
+            aria-label="waiting to sync"
+          />
+        )}
       </button>
 
       {open && (
@@ -102,11 +156,11 @@ export function ReactionButton({ postID }: { postID: number }) {
               role="menuitem"
               title={r.label}
               aria-label={r.label}
-              aria-pressed={current === r.key}
-              onClick={() => choose(r.key)}
+              aria-pressed={value.mine === r.key}
+              onClick={() => void choose(r.key)}
               className={`rounded-full p-1.5 text-2xl leading-none transition
                 hover:scale-125 hover:bg-slate-100 dark:hover:bg-slate-700
-                ${current === r.key ? 'scale-110 bg-slate-100 dark:bg-slate-700' : ''}`}
+                ${value.mine === r.key ? 'scale-110 bg-slate-100 dark:bg-slate-700' : ''}`}
             >
               <span aria-hidden="true">{r.emoji}</span>
             </button>
@@ -118,28 +172,29 @@ export function ReactionButton({ postID }: { postID: number }) {
 }
 
 /**
- * The summary line above the actions.
- *
- * It shows only reactions that actually exist — which, with no backend, means
- * only yours. Inventing a count would be a lie the UI cannot back up.
+ * The tally above the actions: which reactions a post has, and how many people
+ * in total. Renders nothing when nobody has reacted.
  */
-export function ReactionSummary({ postID }: { postID: number }) {
-  const [current, setCurrent] = useState<ReactionKey | null>(() => getReaction(postID))
-
-  useEffect(() => subscribe(() => setCurrent(getReaction(postID))), [postID])
-
-  const active = reactionFor(current)
-  if (!active) return null
+export function ReactionSummary({ value }: { value: Reactions }) {
+  const present = reactions.filter((r) => (value.counts[r.key] ?? 0) > 0)
+  if (present.length === 0) return null
 
   return (
     <span className="flex items-center gap-1.5">
-      <span
-        className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px]
-          leading-none ring-2 ring-white dark:ring-slate-900 ${active.chip}`}
-      >
-        <span aria-hidden="true">{active.emoji}</span>
+      <span className="flex -space-x-1">
+        {present.map((r) => (
+          <span
+            key={r.key}
+            title={`${value.counts[r.key]} ${r.label}`}
+            className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px]
+              leading-none ring-2 ring-white dark:ring-slate-900 ${r.chip}`}
+          >
+            <span aria-hidden="true">{r.emoji}</span>
+          </span>
+        ))}
       </span>
-      <span>You reacted &middot; {active.label}</span>
+      <span className="tabular-nums">{value.total.toLocaleString()}</span>
+      {value.mine && <span className="opacity-70">&middot; including you</span>}
     </span>
   )
 }

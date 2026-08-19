@@ -197,10 +197,16 @@ export function PostDetail() {
 
             <div className="mt-6 border-t border-slate-200 pt-3 dark:border-slate-800">
               <div className="mb-1 px-1 text-xs text-slate-500 dark:text-slate-400">
-                <ReactionSummary postID={post.id} />
+                <ReactionSummary value={post.reactions} />
               </div>
               <div className="flex">
-                <ReactionButton postID={post.id} />
+                <ReactionButton
+                  postID={post.id}
+                  value={post.reactions}
+                  onChange={(reactions) =>
+                    setResult({ post: { ...post, reactions }, servedFrom })
+                  }
+                />
               </div>
             </div>
 

@@ -30,6 +30,35 @@ import (
 // a non-reactor — most of them — would re-query MySQL forever.
 const None = "-"
 
+// A stored reaction is "type|unixMillis" — the choice, and when the person
+// made it.
+//
+// The timestamp is what lets a reaction queued on a phone with no signal be
+// replayed later without stamping on a newer one made since. Keeping it in the
+// same string rather than a second key is what keeps the whole update inside
+// one script.
+const valueSeparator = "|"
+
+func encodeValue(reaction string, atMillis int64) string {
+	return reaction + valueSeparator + strconv.FormatInt(atMillis, 10)
+}
+
+// decodeValue splits a stored value. A value with no separator is read as a
+// bare reaction from before timestamps existed, at time zero, so anything
+// newer replaces it.
+func decodeValue(raw string) (string, int64) {
+	reaction, at, ok := strings.Cut(raw, valueSeparator)
+	if !ok {
+		return raw, 0
+	}
+
+	millis, err := strconv.ParseInt(at, 10, 64)
+	if err != nil {
+		return reaction, 0
+	}
+	return reaction, millis
+}
+
 // Options configures the store's own connection pool.
 type Options struct {
 	Addr     string
@@ -58,27 +87,46 @@ type Store struct {
 // permanently, because nothing on the read path ever recomputes them. Redis
 // runs a script to completion with nothing in between.
 var setScript = redis.NewScript(`
-local old = redis.call('GET', KEYS[1])
-local new = ARGV[1]
+local raw = redis.call('GET', KEYS[1])
+local old, oldAt = '-', 0
+
+if raw then
+  local sep = string.find(raw, '|', 1, true)
+  if sep then
+    old   = string.sub(raw, 1, sep - 1)
+    oldAt = tonumber(string.sub(raw, sep + 1)) or 0
+  else
+    old = raw
+  end
+end
+
+local new   = ARGV[1]
+local newAt = tonumber(ARGV[3])
+
+-- A replayed action that predates what is already stored is discarded. This is
+-- the offline queue arriving after the account reacted somewhere else.
+if newAt < oldAt then
+  return {'stale', old, redis.call('HGETALL', KEYS[2])}
+end
 
 -- tapping the same reaction again takes it back
 if old == new then new = '-' end
 
-if old and old ~= '-' then
+if old ~= '-' then
   redis.call('HINCRBY', KEYS[2], old, -1)
 end
 if new ~= '-' then
   redis.call('HINCRBY', KEYS[2], new, 1)
 end
 
-redis.call('SET', KEYS[1], new)
+redis.call('SET', KEYS[1], new .. '|' .. ARGV[3])
 redis.call('SADD', KEYS[3], ARGV[2])
 
-return {new, redis.call('HGETALL', KEYS[2])}
+return {'applied', new, redis.call('HGETALL', KEYS[2])}
 `)
 
-// hydrateScript writes a post's baseline from the database and marks it loaded,
-// but only if nobody has done so already.
+// hydrateScript writes a post's baseline from the database and marks it
+// loaded, but only if nobody has done so already.
 //
 // Atomic for the same reason the set script is: between checking the marker and
 // writing the baseline, a live reaction could increment a field, and a plain
@@ -137,31 +185,43 @@ type Tally struct {
 	Total  int64
 }
 
-// Set applies a reaction and returns the person's resulting choice — which is
-// None when the same reaction was tapped twice — along with the fresh tally.
-func (s *Store) Set(ctx context.Context, postID, userID uint, reaction string) (string, Tally, error) {
+// Set applies a reaction made at actedAt, and reports the person's resulting
+// choice along with the fresh tally.
+//
+// applied is false when the action was older than what is already stored — a
+// queued offline reaction arriving after a newer one. Nothing changes in that
+// case; the caller is told so it can stop retrying.
+func (s *Store) Set(
+	ctx context.Context,
+	postID, userID uint,
+	reaction string,
+	actedAt time.Time,
+) (mine string, tally Tally, applied bool, err error) {
 	keys := []string{
 		s.key(cachekeys.ReactionUser(postID, userID)),
 		s.key(cachekeys.ReactionCounts(postID)),
 		s.key(cachekeys.ReactionDirty()),
 	}
 
-	raw, err := s.set.Run(ctx, s.client, keys, reaction, pairToken(postID, userID)).Slice()
+	raw, err := s.set.Run(ctx, s.client, keys,
+		reaction, pairToken(postID, userID), actedAt.UnixMilli()).Slice()
 	if err != nil {
-		return "", Tally{}, fmt.Errorf("reactions: apply %q for user %d on post %d: %w", reaction, userID, postID, err)
+		return "", Tally{}, false, fmt.Errorf(
+			"reactions: apply %q for user %d on post %d: %w", reaction, userID, postID, err)
 	}
-	if len(raw) != 2 {
-		return "", Tally{}, fmt.Errorf("reactions: unexpected script result of length %d", len(raw))
+	if len(raw) != 3 {
+		return "", Tally{}, false, fmt.Errorf("reactions: unexpected script result of length %d", len(raw))
 	}
 
-	mine, _ := raw[0].(string)
+	outcome, _ := raw[0].(string)
+	mine, _ = raw[1].(string)
 
-	flat, ok := raw[1].([]any)
+	flat, ok := raw[2].([]any)
 	if !ok {
-		return "", Tally{}, errors.New("reactions: script returned a tally in an unexpected shape")
+		return "", Tally{}, false, errors.New("reactions: script returned a tally in an unexpected shape")
 	}
 
-	return mine, tallyFromFlat(flat), nil
+	return mine, tallyFromFlat(flat), outcome == "applied", nil
 }
 
 // Counts reads a post's tally. The bool reports whether the post has been
@@ -190,10 +250,11 @@ func (s *Store) Mine(ctx context.Context, postID, userID uint) (string, bool, er
 		return "", false, fmt.Errorf("reactions: read reaction of user %d on post %d: %w", userID, postID, err)
 	}
 
-	if value == None {
+	reaction, _ := decodeValue(value)
+	if reaction == None {
 		return "", true, nil
 	}
-	return value, true, nil
+	return reaction, true, nil
 }
 
 // Hydrate seeds a post's tally from the database and marks it loaded, unless
@@ -220,13 +281,21 @@ func (s *Store) Hydrate(ctx context.Context, postID uint, counts map[string]int6
 
 // RememberMine caches one person's stored choice, including the fact that they
 // have none. Pass "" for no reaction and the sentinel is written for you.
-func (s *Store) RememberMine(ctx context.Context, postID, userID uint, reaction string) error {
+//
+// storedAt is when the database row was last written, so a queued offline
+// action older than it is still correctly rejected.
+func (s *Store) RememberMine(
+	ctx context.Context,
+	postID, userID uint,
+	reaction string,
+	storedAt time.Time,
+) error {
 	if reaction == "" {
 		reaction = None
 	}
 
 	key := s.key(cachekeys.ReactionUser(postID, userID))
-	if err := s.client.Set(ctx, key, reaction, 0).Err(); err != nil {
+	if err := s.client.Set(ctx, key, encodeValue(reaction, storedAt.UnixMilli()), 0).Err(); err != nil {
 		return fmt.Errorf("reactions: cache reaction of user %d on post %d: %w", userID, postID, err)
 	}
 	return nil

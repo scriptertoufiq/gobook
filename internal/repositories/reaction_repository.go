@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -39,8 +40,10 @@ type ReactionRepository interface {
 	// for a post nobody has touched since the last restart.
 	CountsForPost(ctx context.Context, postID uint) (map[string]int64, error)
 
-	// TypeForUser returns one person's reaction, or "" when they have none.
-	TypeForUser(ctx context.Context, postID, userID uint) (string, error)
+	// TypeForUser returns one person's reaction and when it was last written,
+	// or "" when they have none. The time matters because a queued offline
+	// action older than the stored row must not replace it.
+	TypeForUser(ctx context.Context, postID, userID uint) (string, time.Time, error)
 
 	// WithTx returns a repository bound to a transaction, so the flusher can
 	// commit its upserts and deletes together.
@@ -135,20 +138,20 @@ func (r *reactionRepository) CountsForPost(ctx context.Context, postID uint) (ma
 
 // TypeForUser returns "" rather than an error when the person has not reacted —
 // having no reaction is an ordinary answer, not a fault.
-func (r *reactionRepository) TypeForUser(ctx context.Context, postID, userID uint) (string, error) {
+func (r *reactionRepository) TypeForUser(ctx context.Context, postID, userID uint) (string, time.Time, error) {
 	var reaction models.Reaction
 
 	err := r.db.WithContext(ctx).
-		Select("type").
+		Select("type", "updated_at").
 		Where("post_id = ? AND user_id = ?", postID, userID).
 		First(&reaction).Error
 
 	switch {
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		return "", nil
+		return "", time.Time{}, nil
 	case err != nil:
-		return "", fmt.Errorf("reactions: read reaction of user %d on post %d: %w", userID, postID, err)
+		return "", time.Time{}, fmt.Errorf("reactions: read reaction of user %d on post %d: %w", userID, postID, err)
 	}
 
-	return reaction.Type, nil
+	return reaction.Type, reaction.UpdatedAt, nil
 }

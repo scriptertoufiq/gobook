@@ -15,6 +15,10 @@ type PostResource struct {
 	Content   string    `json:"content"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+
+	// Reactions is always present, even as an empty tally, so a client never
+	// has to handle a missing key.
+	Reactions ReactionResource `json:"reactions"`
 }
 
 func NewPostResource(p *models.Post) PostResource {
@@ -25,7 +29,14 @@ func NewPostResource(p *models.Post) PostResource {
 		Content:   p.Content,
 		CreatedAt: p.CreatedAt,
 		UpdatedAt: p.UpdatedAt,
+		Reactions: EmptyReactions(),
 	}
+}
+
+// WithReactions attaches a tally to a post resource.
+func (r PostResource) WithReactions(reactions ReactionResource) PostResource {
+	r.Reactions = reactions
+	return r
 }
 
 func NewPostCollection(posts []models.Post) []PostResource {

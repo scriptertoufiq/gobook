@@ -1,26 +1,46 @@
-import type { ReactionKey } from './reactions'
+import { ApiError } from '../api/client'
+import { removeReaction, setReaction } from '../api/reactions'
+import type { ReactionKey } from '../types/api'
 
 /**
- * Per-browser storage for reactions.
+ * The offline outbox for reactions.
  *
- * Versioned key so a future shape change can be ignored rather than crash on
- * whatever is already in someone's localStorage. Reads are defensive for the
- * same reason: this data is outside the app's control and a user can edit it.
+ * Reactions go to the server. This exists only for the case where they cannot:
+ * the request fails to reach the network at all, so the click is parked here
+ * and replayed once the connection comes back. It is a delivery buffer, not a
+ * store — nothing reads its contents to render anything.
+ *
+ * The distinction that matters is between a request that never arrived and one
+ * that arrived and was refused. A 403 or a 404 will fail identically forever,
+ * so queueing it would mean retrying something that can never succeed; only a
+ * genuine transport failure is worth keeping.
  */
-const STORAGE_KEY = 'reactions.v1'
+const STORAGE_KEY = 'reactions.outbox.v1'
 
-type Store = Record<string, ReactionKey>
+/** A reaction waiting to be delivered. A null type means "remove mine". */
+export interface QueuedReaction {
+  postID: number
+  type: ReactionKey | null
+  /** When the person actually clicked, so the server can reject a stale replay. */
+  actedAt: string
+}
+
+type Outbox = Record<string, QueuedReaction>
 
 type Listener = () => void
 const listeners = new Set<Listener>()
 
-/** Subscribe to changes so every card showing a post stays in step. */
+/** Notified whenever the queue changes, so the UI can show what is pending. */
 export function subscribe(fn: Listener): () => void {
   listeners.add(fn)
   return () => listeners.delete(fn)
 }
 
-function read(): Store {
+function notify() {
+  listeners.forEach((fn) => fn())
+}
+
+function read(): Outbox {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return {}
@@ -28,49 +48,148 @@ function read(): Store {
     const parsed: unknown = JSON.parse(raw)
     if (typeof parsed !== 'object' || parsed === null) return {}
 
-    return parsed as Store
+    return parsed as Outbox
   } catch {
-    // Corrupt or unreadable: start clean rather than break every post card.
+    // Corrupt or unreadable. Starting clean loses at most a few queued clicks,
+    // which beats every post card throwing on render.
     return {}
   }
 }
 
-function write(store: Store): void {
+function write(outbox: Outbox) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(store))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(outbox))
   } catch {
-    // Private browsing, or the quota is full. A lost reaction is not worth
-    // failing the render over.
+    // Private browsing, or the quota is full. The reaction is lost rather than
+    // delivered late — worth nobody's crash.
   }
-  listeners.forEach((fn) => fn())
-}
-
-export function getReaction(postID: number): ReactionKey | null {
-  return read()[String(postID)] ?? null
+  notify()
 }
 
 /**
- * Sets a reaction, or clears it when the same one is chosen again — which is
- * how every reaction UI behaves, and the only way to undo without a separate
- * control.
+ * Parks a reaction for later delivery.
+ *
+ * Keyed by post, so clicking repeatedly while offline leaves one entry holding
+ * the final intent — the same collapse the server's own pending set does.
  */
-export function toggleReaction(postID: number, key: ReactionKey): ReactionKey | null {
-  const store = read()
-  const id = String(postID)
-
-  if (store[id] === key) {
-    delete store[id]
-    write(store)
-    return null
-  }
-
-  store[id] = key
-  write(store)
-  return key
+export function enqueue(postID: number, type: ReactionKey | null): void {
+  const outbox = read()
+  outbox[String(postID)] = { postID, type, actedAt: new Date().toISOString() }
+  write(outbox)
 }
 
-export function clearReaction(postID: number): void {
-  const store = read()
-  delete store[String(postID)]
-  write(store)
+export function dequeue(postID: number): void {
+  const outbox = read()
+  delete outbox[String(postID)]
+  write(outbox)
+}
+
+export function queued(postID: number): QueuedReaction | null {
+  return read()[String(postID)] ?? null
+}
+
+export function pending(): QueuedReaction[] {
+  return Object.values(read())
+}
+
+export function pendingCount(): number {
+  return Object.keys(read()).length
+}
+
+/**
+ * True when a failure means the request never reached the server.
+ *
+ * ApiError only exists once a response came back, so anything else — a thrown
+ * TypeError from fetch, a DNS failure, an aborted connection — is a transport
+ * problem worth retrying. A 5xx is included: the server is there but not
+ * answering properly, and the same click will likely work in a minute.
+ */
+export function isTransportFailure(err: unknown): boolean {
+  if (err instanceof ApiError) {
+    return err.status >= 500 || err.status === 0
+  }
+  return true
+}
+
+let draining = false
+
+/**
+ * Delivers everything waiting.
+ *
+ * Guarded against overlapping runs: the online event, the interval and a
+ * successful click can all trigger a drain at once, and replaying the same
+ * entry twice would be wasted requests.
+ *
+ * Returns the posts it settled, so a caller can refresh exactly those rather
+ * than re-reading the whole feed.
+ */
+export async function drain(): Promise<number[]> {
+  if (draining) return []
+
+  const entries = pending()
+  if (entries.length === 0) return []
+
+  draining = true
+  const delivered: number[] = []
+
+  try {
+    for (const entry of entries) {
+      try {
+        const result =
+          entry.type === null
+            ? await removeReaction(entry.postID, entry.actedAt)
+            : await setReaction(entry.postID, entry.type, entry.actedAt)
+
+        // `applied: false` means the server had something newer. The entry is
+        // settled either way — there is nothing left to deliver.
+        dequeue(entry.postID)
+        delivered.push(entry.postID)
+
+        if (!result.applied) {
+          console.info(
+            `reactions: queued reaction for post ${entry.postID} was superseded by a newer one`,
+          )
+        }
+      } catch (err) {
+        if (isTransportFailure(err)) {
+          // Still offline. Leave this and everything after it for the next try.
+          break
+        }
+
+        // Refused rather than undelivered — a deleted post, or a rejected
+        // value. Retrying cannot help, so drop it.
+        dequeue(entry.postID)
+        delivered.push(entry.postID)
+      }
+    }
+  } finally {
+    draining = false
+  }
+
+  return delivered
+}
+
+/**
+ * Starts draining whenever the connection returns.
+ *
+ * Both signals are used because neither is sufficient: `online` does not fire
+ * for a connection that is up but useless — a captive portal, a dead uplink —
+ * and a bare interval would take up to its full period to notice a laptop
+ * waking up.
+ */
+export function watchConnection(onDrained: (postIDs: number[]) => void): () => void {
+  const attempt = () => {
+    void drain().then((delivered) => {
+      if (delivered.length > 0) onDrained(delivered)
+    })
+  }
+
+  window.addEventListener('online', attempt)
+  const timer = setInterval(attempt, 30_000)
+  attempt() // and once now, for whatever an earlier session left behind
+
+  return () => {
+    window.removeEventListener('online', attempt)
+    clearInterval(timer)
+  }
 }

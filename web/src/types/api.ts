@@ -42,6 +42,24 @@ export interface User {
   updated_at: string
 }
 
+/** The five responses a post accepts. Mirrors models.ReactionTypes. */
+export type ReactionKey = 'like' | 'love' | 'care' | 'sad' | 'angry'
+
+/** Mirrors internal/resources.ReactionResource. */
+export interface Reactions {
+  /** Keyed by type; types nobody has chosen are omitted. */
+  counts: Partial<Record<ReactionKey, number>>
+  total: number
+  /** The viewer's own reaction, or null. */
+  mine: ReactionKey | null
+  /**
+   * False when a replayed action was discarded for being older than what the
+   * server already had. A queued entry that comes back false is settled and
+   * should be dropped rather than retried.
+   */
+  applied: boolean
+}
+
 /** Mirrors internal/resources.PostResource. */
 export interface Post {
   id: number
@@ -50,6 +68,7 @@ export interface Post {
   content: string
   created_at: string
   updated_at: string
+  reactions: Reactions
 }
 
 export interface TokenPair {

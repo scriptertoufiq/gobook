@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"log"
+	"time"
 
 	"github.com/scriptertoufiq/go-mvc/internal/models"
 	"github.com/scriptertoufiq/go-mvc/internal/reactions"
@@ -36,12 +37,21 @@ type Summary struct {
 	Total  int64
 	// Mine is the viewer's own reaction, or "" when they have none.
 	Mine string
+
+	// Applied is false when a replayed action was discarded for being older
+	// than what is already stored. Reads leave it true — nothing was rejected.
+	Applied bool
 }
 
 // Set applies a reaction. Sending the one already held takes it back, which is
 // how every reaction UI behaves and the only way to undo without a second
 // control.
-func (s *ReactionService) Set(ctx context.Context, postID, userID uint, reaction string) (Summary, error) {
+func (s *ReactionService) Set(
+	ctx context.Context,
+	postID, userID uint,
+	reaction string,
+	actedAt time.Time,
+) (Summary, error) {
 	if !models.IsValidReaction(reaction) {
 		return Summary{}, apperror.Validation("That is not a reaction this app accepts.")
 	}
@@ -59,7 +69,7 @@ func (s *ReactionService) Set(ctx context.Context, postID, userID uint, reaction
 		return Summary{}, err
 	}
 
-	mine, tally, err := s.store.Set(ctx, postID, userID, reaction)
+	mine, tally, applied, err := s.store.Set(ctx, postID, userID, reaction, s.stamp(actedAt))
 	if err != nil {
 		return Summary{}, apperror.Internal(err)
 	}
@@ -68,12 +78,33 @@ func (s *ReactionService) Set(ctx context.Context, postID, userID uint, reaction
 		mine = ""
 	}
 
-	return Summary{Counts: tally.Counts, Total: tally.Total, Mine: mine}, nil
+	// Not applied means a newer reaction was already recorded — the caller is
+	// replaying something stale. The tally returned is the current one, so the
+	// client can settle on it and stop retrying.
+	return Summary{Counts: tally.Counts, Total: tally.Total, Mine: mine, Applied: applied}, nil
+}
+
+// stamp normalises when an action happened.
+//
+// A zero time means "now" — an ordinary online request. A supplied time comes
+// from a client replaying its offline queue, and is clamped to the present:
+// a device with a wrong clock claiming the future would otherwise win every
+// conflict for as long as its clock stayed ahead.
+func (s *ReactionService) stamp(actedAt time.Time) time.Time {
+	now := time.Now()
+	if actedAt.IsZero() || actedAt.After(now) {
+		return now
+	}
+	return actedAt
 }
 
 // Remove takes a reaction back. Idempotent: removing when nothing is held is a
 // success, because the caller's intent is already satisfied.
-func (s *ReactionService) Remove(ctx context.Context, postID, userID uint) (Summary, error) {
+func (s *ReactionService) Remove(
+	ctx context.Context,
+	postID, userID uint,
+	actedAt time.Time,
+) (Summary, error) {
 	if _, _, err := s.posts.Get(ctx, postID); err != nil {
 		return Summary{}, err
 	}
@@ -102,12 +133,20 @@ func (s *ReactionService) Remove(ctx context.Context, postID, userID uint) (Summ
 	}
 
 	// Sending the held reaction back through Set is what clears it.
-	_, tally, err := s.store.Set(ctx, postID, userID, current)
+	mine, tally, applied, err := s.store.Set(ctx, postID, userID, current, s.stamp(actedAt))
 	if err != nil {
 		return Summary{}, apperror.Internal(err)
 	}
 
-	return Summary{Counts: tally.Counts, Total: tally.Total, Mine: ""}, nil
+	// Report what the script left in place rather than assuming the removal
+	// took. A replayed removal older than the stored reaction is rejected, and
+	// saying the reaction is gone when it is not would have the client render
+	// a state the server does not hold.
+	if mine == reactions.None {
+		mine = ""
+	}
+
+	return Summary{Counts: tally.Counts, Total: tally.Total, Mine: mine, Applied: applied}, nil
 }
 
 // Summary reads a post's tally and the viewer's own choice, warming whichever
@@ -128,7 +167,7 @@ func (s *ReactionService) Summary(ctx context.Context, postID, viewerID uint) (S
 		return Summary{}, apperror.Internal(err)
 	}
 
-	summary := Summary{Counts: tally.Counts, Total: tally.Total}
+	summary := Summary{Counts: tally.Counts, Total: tally.Total, Applied: true}
 	if viewerID == 0 {
 		return summary, nil
 	}
@@ -181,16 +220,45 @@ func (s *ReactionService) ensureHydrated(ctx context.Context, postID uint) error
 // fact that they have none, which is what stops the lookup repeating on every
 // page view by a non-reactor.
 func (s *ReactionService) hydrateMine(ctx context.Context, postID, userID uint) (string, error) {
-	stored, err := s.repo.TypeForUser(ctx, postID, userID)
+	stored, storedAt, err := s.repo.TypeForUser(ctx, postID, userID)
 	if err != nil {
 		return "", apperror.Internal(err)
 	}
 
-	if err := s.store.RememberMine(ctx, postID, userID, stored); err != nil {
+	if err := s.store.RememberMine(ctx, postID, userID, stored, storedAt); err != nil {
 		log.Printf("reactions: could not cache reaction of user %d on post %d: %v", userID, postID, err)
 	}
 
 	return stored, nil
+}
+
+// SummariseMany reads tallies for a page of posts.
+//
+// Sequential rather than pipelined, because each post may need hydrating from
+// a different set of rows and that cannot be batched into one Redis call. It
+// is still cheap — a hydrated post costs two Redis reads — and it only touches
+// the database for posts nobody has looked at since the last restart.
+//
+// A failure on one post yields an empty tally for it rather than failing the
+// whole page: a feed that renders without counts beats a feed that does not
+// render.
+func (s *ReactionService) SummariseMany(
+	ctx context.Context,
+	postIDs []uint,
+	viewerID uint,
+) map[uint]Summary {
+	out := make(map[uint]Summary, len(postIDs))
+
+	for _, id := range postIDs {
+		summary, err := s.Summary(ctx, id, viewerID)
+		if err != nil {
+			log.Printf("reactions: could not summarise post %d for a listing: %v", id, err)
+			continue
+		}
+		out[id] = summary
+	}
+
+	return out
 }
 
 // Forget clears a deleted post's cached tally. Its rows go with the post

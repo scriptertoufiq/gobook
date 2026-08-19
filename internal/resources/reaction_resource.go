@@ -17,6 +17,11 @@ type ReactionResource struct {
 	Total  int64            `json:"total"`
 	// Mine is the viewer's own reaction, or null.
 	Mine *string `json:"mine"`
+
+	// Applied is false when a replayed action was discarded for being older
+	// than what is already stored. A client draining an offline queue reads
+	// this to know the entry is settled and can be dropped rather than retried.
+	Applied bool `json:"applied"`
 }
 
 func NewReactionResource(summary services.Summary) ReactionResource {
@@ -25,7 +30,7 @@ func NewReactionResource(summary services.Summary) ReactionResource {
 		counts = map[string]int64{}
 	}
 
-	resource := ReactionResource{Counts: counts, Total: summary.Total}
+	resource := ReactionResource{Counts: counts, Total: summary.Total, Applied: summary.Applied}
 	if summary.Mine != "" {
 		mine := summary.Mine
 		resource.Mine = &mine
@@ -36,7 +41,7 @@ func NewReactionResource(summary services.Summary) ReactionResource {
 // EmptyReactions is what a post carries before anything is known about it —
 // an explicit zero state, so a client never has to handle a missing key.
 func EmptyReactions() ReactionResource {
-	return ReactionResource{Counts: map[string]int64{}, Total: 0}
+	return ReactionResource{Counts: map[string]int64{}, Total: 0, Applied: true}
 }
 
 // ReactionTypes exposes the accepted set, so a client can render a picker

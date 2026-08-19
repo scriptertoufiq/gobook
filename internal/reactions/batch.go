@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/redis/go-redis/v9"
 
 	"github.com/scriptertoufiq/go-mvc/internal/cachekeys"
+	"github.com/scriptertoufiq/go-mvc/internal/models"
 	"github.com/scriptertoufiq/go-mvc/internal/repositories"
 )
 
@@ -43,8 +45,11 @@ func (s *Store) Claim(ctx context.Context, runID string) (Batch, error) {
 	to := s.key(cachekeys.ReactionFlushing(runID))
 
 	if err := s.client.Rename(ctx, from, to).Err(); err != nil {
-		if errors.Is(err, redis.Nil) {
-			return Batch{}, nil // nothing pending; RENAME on a missing key is not a fault
+		// An empty queue is the common case, and RENAME reports it as a plain
+		// "ERR no such key" rather than redis.Nil — so it has to be matched on
+		// the message. Treating it as a fault would log an error every idle tick.
+		if errors.Is(err, redis.Nil) || strings.Contains(err.Error(), "no such key") {
+			return Batch{}, nil
 		}
 		return Batch{}, fmt.Errorf("reactions: claim pending set: %w", err)
 	}
@@ -92,8 +97,8 @@ func (s *Store) resolve(ctx context.Context, runID string) (Batch, error) {
 	for n, idx := range valid {
 		pair := pairs[n]
 
-		value, err := cmds[idx].Result()
-		if errors.Is(err, redis.Nil) || value == None {
+		raw, err := cmds[idx].Result()
+		if errors.Is(err, redis.Nil) {
 			// Absent means the key was evicted or expired, which should not
 			// happen for reaction keys — either way there is nothing to store,
 			// so treat it the same as an explicit removal.
@@ -104,8 +109,26 @@ func (s *Store) resolve(ctx context.Context, runID string) (Batch, error) {
 			return Batch{}, fmt.Errorf("reactions: read pending value: %w", err)
 		}
 
+		// The stored value is "type|millis" — the timestamp must be stripped
+		// before anything reaches the type column.
+		reaction, _ := decodeValue(raw)
+
+		if reaction == None {
+			batch.Deletes = append(batch.Deletes, pair)
+			continue
+		}
+
+		// Anything that is not a reaction this app recognises is dropped rather
+		// than written. A malformed value can only come from a bug, and the
+		// database is the wrong place to discover one.
+		if !models.IsValidReaction(reaction) {
+			log.Printf("reactions: discarding unrecognised value %q for post %d user %d",
+				raw, pair.PostID, pair.UserID)
+			continue
+		}
+
 		batch.Upserts = append(batch.Upserts, pair)
-		batch.Types = append(batch.Types, value)
+		batch.Types = append(batch.Types, reaction)
 	}
 
 	return batch, nil
