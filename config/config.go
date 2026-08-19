@@ -47,6 +47,14 @@ type RedisConfig struct {
 	// reproduce, so the cache should forget quickly until proven otherwise.
 	DefaultTTL time.Duration
 
+	// CommentTTL is how long a cached page of a post's conversation lives.
+	//
+	// Unlike the post cache this must never be zero. Comment pages are
+	// invalidated by raising a generation counter, which orphans the old pages
+	// rather than deleting them — their expiry is the only thing that ever
+	// reclaims the memory.
+	CommentTTL time.Duration
+
 	// ReactionFlushInterval is how often reactions held in Redis are written
 	// to MySQL. It is also the size of the window in which a Redis failure
 	// loses reactions, so it is short by default.
@@ -226,6 +234,7 @@ func Load() *Config {
 			// -1 is the "not configured" sentinel, so an explicit 0 can mean
 			// "never expire" rather than being mistaken for an absent value.
 			PostTTL:               cacheTTL("CACHE_POST_TTL", envInt("CACHE_DEFAULT_TTL", 300)),
+			CommentTTL:            commentTTL(),
 			ReactionFlushInterval: time.Duration(envInt("REACTION_FLUSH_INTERVAL", 10)) * time.Second,
 		},
 		DB: DBConfig{
@@ -248,6 +257,20 @@ func cacheTTL(key string, fallbackSeconds int) time.Duration {
 	seconds := envInt(key, -1)
 	if seconds < 0 {
 		seconds = fallbackSeconds
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// commentTTL reads CACHE_COMMENT_TTL in seconds, refusing zero.
+//
+// A zero here would mean orphaned comment pages are never reclaimed, so the
+// setting is clamped rather than honoured — a slow leak nobody notices is worse
+// than an ignored configuration value that shows up in the boot log.
+func commentTTL() time.Duration {
+	seconds := envInt("CACHE_COMMENT_TTL", 300)
+	if seconds <= 0 {
+		log.Println("config: CACHE_COMMENT_TTL must be above zero, using 300s")
+		seconds = 300
 	}
 	return time.Duration(seconds) * time.Second
 }

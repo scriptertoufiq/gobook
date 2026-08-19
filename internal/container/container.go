@@ -115,6 +115,7 @@ func Build(db *gorm.DB, cfg *config.Config) (*Container, error) {
 
 	dispatcher := events.New()
 	listeners.NewPostCacheListener(cacheStore, cfg.Redis.PostTTL).Register(dispatcher)
+	listeners.NewCommentCacheListener(cacheStore).Register(dispatcher)
 	if reactionStore != nil {
 		listeners.NewPostReactionsListener(reactionStore).Register(dispatcher)
 	}
@@ -165,7 +166,8 @@ func Build(db *gorm.DB, cfg *config.Config) (*Container, error) {
 
 	postService := services.NewPostService(postRepo, cacheStore, dispatcher, cfg.Redis.PostTTL)
 
-	commentService := services.NewCommentService(commentRepo, postService)
+	commentService := services.NewCommentService(
+		commentRepo, postService, cacheStore, dispatcher, cfg.Redis.CommentTTL)
 
 	var reactionService *services.ReactionService
 	if reactionStore != nil {
@@ -264,8 +266,9 @@ func buildCache(cfg *config.Config) (cache.Cache, error) {
 		postTTL = "never expires"
 	}
 
-	log.Printf("cache: redis at %s (db=%d, prefix=%q, default ttl=%s, post ttl=%s)",
-		cfg.Redis.Addr(), cfg.Redis.DB, cfg.Redis.Prefix, cfg.Redis.DefaultTTL, postTTL)
+	log.Printf("cache: redis at %s (db=%d, prefix=%q, default ttl=%s, post ttl=%s, comment ttl=%s)",
+		cfg.Redis.Addr(), cfg.Redis.DB, cfg.Redis.Prefix,
+		cfg.Redis.DefaultTTL, postTTL, cfg.Redis.CommentTTL)
 
 	return store, nil
 }

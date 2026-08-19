@@ -56,6 +56,39 @@ func ReactionFlushingPrefix() string {
 	return cache.Key("reactions", "flushing")
 }
 
+// CommentGeneration counts how many times a post's conversation has changed.
+//
+// One counter per post, not one global: commenting on post 5 must not throw
+// away everything cached for post 9. Bumping it orphans every cached page of
+// that post's comments and replies at once — including the top-level pages,
+// whose reply counts a new reply also changes.
+func CommentGeneration(postID uint) string {
+	return cache.Key("comments", "gen", postID)
+}
+
+// Comment names one cached comment.
+//
+// Not generation-versioned like the pages are, because a single comment can be
+// invalidated precisely — the change event carries its id. The pages cannot, so
+// they get the generation instead.
+func Comment(commentID uint) string {
+	return cache.Key("comments", "show", commentID)
+}
+
+// CommentPage names one cached page of a post's top-level comments.
+//
+// The generation is part of the key rather than something to look up and
+// compare: a stale page is not found rather than found-and-rejected.
+func CommentPage(postID uint, generation int64, page, perPage int, sortDir, search string) string {
+	return cache.Key("comments", "post", postID, generation, page, perPage, sortDir, search)
+}
+
+// ReplyPage names one cached page of the replies under a comment. It shares the
+// post's generation, so any change to the conversation clears both.
+func ReplyPage(postID, parentID uint, generation int64, page, perPage int, sortDir, search string) string {
+	return cache.Key("comments", "replies", parentID, generation, page, perPage, sortDir, search)
+}
+
 // PostListGeneration counts how many times the post listings have been
 // invalidated.
 //

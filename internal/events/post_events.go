@@ -10,7 +10,26 @@ const (
 	PostCreatedName = "post.created"
 	PostUpdatedName = "post.updated"
 	PostDeletedName = "post.deleted"
+
+	CommentCreatedName = "comment.created"
+	CommentUpdatedName = "comment.updated"
+	CommentDeletedName = "comment.deleted"
 )
+
+// CommentChanged is emitted whenever a post's conversation changes.
+//
+// One event type for all three verbs, because every listener so far reacts the
+// same way: the cached pages of that post's conversation are no longer
+// trustworthy. The verb is carried for anything that later needs to tell them
+// apart — a notification, say — without needing three near-identical types now.
+type CommentChanged struct {
+	PostID    uint
+	CommentID uint
+	// Verb is one of the Comment*Name constants.
+	Verb string
+}
+
+func (c CommentChanged) Name() string { return c.Verb }
 
 // PostCreated is emitted after a post is persisted.
 type PostCreated struct {
