@@ -19,6 +19,9 @@ type PostResource struct {
 	// Reactions is always present, even as an empty tally, so a client never
 	// has to handle a missing key.
 	Reactions ReactionResource `json:"reactions"`
+
+	// CommentCount is the whole conversation under this post, replies included.
+	CommentCount int64 `json:"comment_count"`
 }
 
 func NewPostResource(p *models.Post) PostResource {
@@ -36,6 +39,12 @@ func NewPostResource(p *models.Post) PostResource {
 // WithReactions attaches a tally to a post resource.
 func (r PostResource) WithReactions(reactions ReactionResource) PostResource {
 	r.Reactions = reactions
+	return r
+}
+
+// WithCommentCount attaches how much conversation a post has.
+func (r PostResource) WithCommentCount(n int64) PostResource {
+	r.CommentCount = n
 	return r
 }
 

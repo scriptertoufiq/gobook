@@ -33,6 +33,7 @@ type Container struct {
 	User     *controllers.UserController
 	Post     *controllers.PostController
 	Reaction *controllers.ReactionController
+	Comment  *controllers.CommentController
 	// codegen:fields
 
 	// JWT is exposed so the route table can build auth middleware from it.
@@ -140,6 +141,7 @@ func Build(db *gorm.DB, cfg *config.Config) (*Container, error) {
 	passwordResetRepo := repositories.NewPasswordResetRepository(db)
 	postRepo := repositories.NewPostRepository(db)
 	reactionRepo := repositories.NewReactionRepository(db)
+	commentRepo := repositories.NewCommentRepository(db)
 	// codegen:repositories
 
 	// Services
@@ -163,6 +165,8 @@ func Build(db *gorm.DB, cfg *config.Config) (*Container, error) {
 
 	postService := services.NewPostService(postRepo, cacheStore, dispatcher, cfg.Redis.PostTTL)
 
+	commentService := services.NewCommentService(commentRepo, postService)
+
 	var reactionService *services.ReactionService
 	if reactionStore != nil {
 		reactionService = services.NewReactionService(reactionStore, reactionRepo, postService)
@@ -184,8 +188,9 @@ func Build(db *gorm.DB, cfg *config.Config) (*Container, error) {
 		Health:   controllers.NewHealthController(db, cacheStore, cfg.App.Name),
 		Auth:     controllers.NewAuthController(authService, userService),
 		User:     controllers.NewUserController(userService),
-		Post:     controllers.NewPostController(postService, reactionService),
+		Post:     controllers.NewPostController(postService, reactionService, commentService),
 		Reaction: controllers.NewReactionController(reactionService),
+		Comment:  controllers.NewCommentController(commentService),
 		// codegen:controllers
 
 		JWT:                      jwtManager,

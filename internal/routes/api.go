@@ -85,6 +85,23 @@ func registerAPI(api *gin.RouterGroup, c *container.Container) {
 		posts.GET("/:id/reactions", c.Reaction.Show)
 		posts.PUT("/:id/reaction", c.Reaction.Set)
 		posts.DELETE("/:id/reaction", c.Reaction.Remove)
+
+		// Comments on a post. Replies hang off a comment, not a post, so they
+		// live under /comments below.
+		posts.GET("/:id/comments", c.Comment.Index)
+		posts.POST("/:id/comments", c.Comment.Store)
+	}
+
+	// Comments are addressed by their own id once they exist, so editing,
+	// deleting and replying do not need the post in the path — and cannot
+	// disagree with it.
+	comments := api.Group("/comments", authenticated, verified)
+	{
+		comments.GET("/:id/replies", c.Comment.Replies)
+		comments.POST("/:id/replies", c.Comment.Reply)
+		comments.PATCH("/:id", c.Comment.Update)
+		comments.PUT("/:id", c.Comment.Update)
+		comments.DELETE("/:id", c.Comment.Destroy)
 	}
 
 	// codegen:routes

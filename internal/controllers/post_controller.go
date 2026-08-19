@@ -18,10 +18,15 @@ import (
 type PostController struct {
 	service   *services.PostService
 	reactions *services.ReactionService
+	comments  *services.CommentService
 }
 
-func NewPostController(service *services.PostService, reactions *services.ReactionService) *PostController {
-	return &PostController{service: service, reactions: reactions}
+func NewPostController(
+	service *services.PostService,
+	reactions *services.ReactionService,
+	comments *services.CommentService,
+) *PostController {
+	return &PostController{service: service, reactions: reactions, comments: comments}
 }
 
 // viewer is the caller's id, or 0 when there is none.
@@ -77,6 +82,20 @@ func (ctrl *PostController) Index(c *gin.Context) {
 		}
 	}
 
+	if ctrl.comments != nil {
+		ids := make([]uint, 0, len(posts))
+		for i := range posts {
+			ids = append(ids, posts[i].ID)
+		}
+
+		// One grouped COUNT for the whole page, not one per post.
+		if counts, err := ctrl.comments.CountsForPosts(c.Request.Context(), ids); err == nil {
+			for i := range collection {
+				collection[i] = collection[i].WithCommentCount(counts[collection[i].ID])
+			}
+		}
+	}
+
 	response.Paginated(c, collection, meta)
 }
 
@@ -106,6 +125,12 @@ func (ctrl *PostController) Show(c *gin.Context) {
 	if ctrl.reactions != nil {
 		if summary, err := ctrl.reactions.Summary(c.Request.Context(), id, viewer(c)); err == nil {
 			resource = resource.WithReactions(resources.NewReactionResource(summary))
+		}
+	}
+
+	if ctrl.comments != nil {
+		if counts, err := ctrl.comments.CountsForPosts(c.Request.Context(), []uint{id}); err == nil {
+			resource = resource.WithCommentCount(counts[id])
 		}
 	}
 
