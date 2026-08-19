@@ -15,6 +15,7 @@ import (
 	"github.com/scriptertoufiq/go-mvc/config"
 	"github.com/scriptertoufiq/go-mvc/internal/controllers"
 	"github.com/scriptertoufiq/go-mvc/internal/listeners"
+	"github.com/scriptertoufiq/go-mvc/internal/reactions"
 	"github.com/scriptertoufiq/go-mvc/internal/repositories"
 	"github.com/scriptertoufiq/go-mvc/internal/services"
 	"github.com/scriptertoufiq/go-mvc/pkg/cache"
@@ -27,10 +28,11 @@ import (
 // Lines marked `codegen:` are insertion points for `go run ./cmd/make`.
 // Keep them — the generator writes directly above each one.
 type Container struct {
-	Health *controllers.HealthController
-	Auth   *controllers.AuthController
-	User   *controllers.UserController
-	Post   *controllers.PostController
+	Health   *controllers.HealthController
+	Auth     *controllers.AuthController
+	User     *controllers.UserController
+	Post     *controllers.PostController
+	Reaction *controllers.ReactionController
 	// codegen:fields
 
 	// JWT is exposed so the route table can build auth middleware from it.
@@ -41,6 +43,11 @@ type Container struct {
 	// Cache is never nil — cache.Null stands in when REDIS_ENABLED=false, so
 	// callers need no branch for the disabled case.
 	Cache cache.Cache
+
+	// Reactions is the hot tier for reactions. Nil when Redis is switched off,
+	// because unlike the post cache there is no correct no-op: a reaction that
+	// is not stored anywhere is a lost reaction, not a slow one.
+	Reactions *reactions.Store
 
 	// Events is the in-process bus. Exposed so a future CLI command or worker
 	// can dispatch and subscribe through the same wiring the HTTP app uses.
@@ -73,6 +80,12 @@ func (c *Container) Close() {
 				log.Printf("shutdown: closing cache: %v", err)
 			}
 		}
+
+		if c.Reactions != nil {
+			if err := c.Reactions.Close(); err != nil {
+				log.Printf("shutdown: closing reaction store: %v", err)
+			}
+		}
 	})
 }
 
@@ -94,8 +107,16 @@ func Build(db *gorm.DB, cfg *config.Config) (*Container, error) {
 	// The event bus, and everything subscribed to it. Registering here — rather
 	// than inside a service — is what keeps "who reacts to what" answerable
 	// from one file.
+	reactionStore, err := buildReactionStore(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	dispatcher := events.New()
 	listeners.NewPostCacheListener(cacheStore, cfg.Redis.PostTTL).Register(dispatcher)
+	if reactionStore != nil {
+		listeners.NewPostReactionsListener(reactionStore).Register(dispatcher)
+	}
 
 	var apiLimiter, authLimiter *ratelimit.Limiter
 	if cfg.RateLimit.Enabled {
@@ -118,6 +139,7 @@ func Build(db *gorm.DB, cfg *config.Config) (*Container, error) {
 	verificationRepo := repositories.NewEmailVerificationRepository(db)
 	passwordResetRepo := repositories.NewPasswordResetRepository(db)
 	postRepo := repositories.NewPostRepository(db)
+	reactionRepo := repositories.NewReactionRepository(db)
 	// codegen:repositories
 
 	// Services
@@ -140,6 +162,11 @@ func Build(db *gorm.DB, cfg *config.Config) (*Container, error) {
 	userService.OnEmailNeedsVerification(authService.HandleEmailNeedsVerification)
 
 	postService := services.NewPostService(postRepo, cacheStore, dispatcher, cfg.Redis.PostTTL)
+
+	var reactionService *services.ReactionService
+	if reactionStore != nil {
+		reactionService = services.NewReactionService(reactionStore, reactionRepo, postService)
+	}
 	// codegen:services
 
 	// Background jobs
@@ -148,20 +175,56 @@ func Build(db *gorm.DB, cfg *config.Config) (*Container, error) {
 
 	// Controllers
 	return &Container{
-		Health: controllers.NewHealthController(db, cacheStore, cfg.App.Name),
-		Auth:   controllers.NewAuthController(authService, userService),
-		User:   controllers.NewUserController(userService),
-		Post:   controllers.NewPostController(postService),
+		Health:   controllers.NewHealthController(db, cacheStore, cfg.App.Name),
+		Auth:     controllers.NewAuthController(authService, userService),
+		User:     controllers.NewUserController(userService),
+		Post:     controllers.NewPostController(postService),
+		Reaction: controllers.NewReactionController(reactionService),
 		// codegen:controllers
 
 		JWT:                      jwtManager,
 		RequireEmailVerification: cfg.Auth.RequireEmailVerification,
 		Cache:                    cacheStore,
+		Reactions:                reactionStore,
 		Events:                   dispatcher,
 		APIRateLimiter:           apiLimiter,
 		AuthRateLimiter:          authLimiter,
 		stopBackground:           stopBackground,
 	}, nil
+}
+
+// buildReactionStore opens the reactions tier.
+//
+// Its own pool rather than sharing the cache's: pkg/cache is a JSON
+// get/set/delete cache by design, and reactions need hashes, sets and a Lua
+// script. Two pools to the same server is cheap and keeps each package
+// independent.
+//
+// Returns nil when Redis is off. There is deliberately no null implementation:
+// a cache miss costs a query, but a reaction that is stored nowhere is simply
+// lost, so the honest answer is that the feature is unavailable.
+func buildReactionStore(cfg *config.Config) (*reactions.Store, error) {
+	if !cfg.Redis.Enabled {
+		log.Println("reactions: disabled (REDIS_ENABLED=false)")
+		return nil, nil
+	}
+
+	store, err := reactions.New(reactions.Options{
+		Addr:        cfg.Redis.Addr(),
+		Username:    cfg.Redis.Username,
+		Password:    cfg.Redis.Password,
+		DB:          cfg.Redis.DB,
+		Prefix:      cfg.Redis.Prefix,
+		DialTimeout: cfg.Redis.DialTimeout,
+		Timeout:     cfg.Redis.Timeout,
+		PoolSize:    cfg.Redis.PoolSize,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	log.Println("reactions: hot store ready")
+	return store, nil
 }
 
 // buildCache opens Redis, or returns the no-op cache when caching is off.

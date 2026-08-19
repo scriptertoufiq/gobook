@@ -79,6 +79,12 @@ func registerAPI(api *gin.RouterGroup, c *container.Container) {
 		posts.PATCH("/:id", c.Post.Update)
 		posts.PUT("/:id", c.Post.Update)
 		posts.DELETE("/:id", c.Post.Destroy)
+
+		// Reactions. Anyone signed in may react to any post — unlike editing,
+		// which is the author's alone. PUT because setting one is idempotent.
+		posts.GET("/:id/reactions", c.Reaction.Show)
+		posts.PUT("/:id/reaction", c.Reaction.Set)
+		posts.DELETE("/:id/reaction", c.Reaction.Remove)
 	}
 
 	// codegen:routes
