@@ -122,8 +122,12 @@ export function CommentItem({
           <CommentComposer
             placeholder="Edit your comment"
             submitLabel="Save"
+            initialValue={comment.body}
             autoFocus
             compact={isReply}
+            // This row already draws the author's avatar; the composer would
+            // otherwise put a second one beside it.
+            showAvatar={false}
             onSubmit={saveEdit}
             onCancel={() => setEditing(false)}
           />

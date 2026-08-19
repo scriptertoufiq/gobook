@@ -14,26 +14,43 @@ import { Alert } from '../ui'
 export function CommentComposer({
   placeholder,
   submitLabel = 'Comment',
+  initialValue = '',
   autoFocus = false,
   compact = false,
+  showAvatar = true,
   onSubmit,
   onCancel,
 }: {
   placeholder: string
   submitLabel?: string
+  /** Text to start from. Editing passes the comment being changed. */
+  initialValue?: string
   autoFocus?: boolean
   compact?: boolean
+  /**
+   * Whether to draw the writer's avatar. Off when the composer replaces a
+   * comment's body in place, since that row already has one.
+   */
+  showAvatar?: boolean
   onSubmit: (body: string) => Promise<void>
   onCancel?: () => void
 }) {
   const { user } = useAuth()
-  const [body, setBody] = useState('')
+  const [body, setBody] = useState(initialValue)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<FormError | null>(null)
   const field = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
-    if (autoFocus) field.current?.focus()
+    if (!autoFocus) return
+
+    const node = field.current
+    if (!node) return
+
+    node.focus()
+    // Cursor at the end rather than the start, so editing continues the
+    // sentence instead of typing in front of it.
+    node.setSelectionRange(node.value.length, node.value.length)
   }, [autoFocus])
 
   // Grow to fit, so a long comment is readable while being written.
@@ -53,7 +70,9 @@ export function CommentComposer({
 
     try {
       await onSubmit(body.trim())
-      setBody('')
+      // Back to where it started: empty for a new comment, and for an edit the
+      // original text, which matters only if the form outlives the save.
+      setBody(initialValue)
     } catch (err) {
       setError(toFormError(err))
     } finally {
@@ -72,7 +91,7 @@ export function CommentComposer({
 
   return (
     <form onSubmit={submit} className="flex gap-2">
-      <Avatar name={user?.name ?? '?'} size={compact ? 28 : 34} />
+      {showAvatar && <Avatar name={user?.name ?? '?'} size={compact ? 28 : 34} />}
 
       <div className="min-w-0 flex-1 space-y-2">
         {error && <Alert kind="error">{error.message}</Alert>}
