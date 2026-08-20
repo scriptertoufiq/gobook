@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { deletePost } from '../../api/posts'
+import { deletePost, getPost } from '../../api/posts'
 import { useAuth } from '../../auth/context'
 import { toFormError } from '../../lib/errors'
 import { relativeTime } from '../../lib/time'
@@ -10,6 +10,7 @@ import { Avatar } from '../Avatar'
 import { ConfirmDialog } from '../ConfirmDialog'
 import { CommentIcon, GlobeIcon, ShareIcon } from '../icons'
 import { Alert } from '../ui'
+import { CommentThread } from '../comments/CommentThread'
 import { PostEditor } from './PostEditor'
 import { PostMenu } from './PostMenu'
 import { ReactionButton, ReactionSummary } from './ReactionBar'
@@ -25,6 +26,7 @@ export function PostCard({
 }) {
   const { user } = useAuth()
   const [editing, setEditing] = useState(false)
+  const [commentsOpen, setCommentsOpen] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -138,21 +140,43 @@ export function PostCard({
               value={post.reactions}
               onChange={(reactions) => onUpdated({ ...post, reactions })}
             />
-            <Link
-              to={`/posts/${post.id}`}
-              className="flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-sm
-                font-medium text-slate-600 transition hover:bg-slate-100
-                dark:text-slate-400 dark:hover:bg-slate-800"
+            {/* Opens the conversation in place. Reading a feed and having to
+                leave it to say anything is the reason nobody says anything. */}
+            <button
+              type="button"
+              aria-expanded={commentsOpen}
+              onClick={() => setCommentsOpen((open) => !open)}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-sm
+                font-medium transition hover:bg-slate-100 dark:hover:bg-slate-800
+                ${commentsOpen ? 'text-blue-600 dark:text-blue-400' : 'text-slate-600 dark:text-slate-400'}`}
             >
               <CommentIcon />
               Comment
               {post.comment_count > 0 && (
                 <span className="tabular-nums">{post.comment_count}</span>
               )}
-            </Link>
+            </button>
             <Action icon={<ShareIcon />} label="Share" />
           </footer>
         </>
+      )}
+
+      {commentsOpen && !editing && (
+        <div className="border-t border-slate-200 p-3 dark:border-slate-800">
+          <CommentThread
+            postID={post.id}
+            total={post.comment_count}
+            onChanged={() => {
+              // Re-read the post rather than adjust the count here: deleting a
+              // comment takes its replies with it, so the delta is not known.
+              void getPost(post.id)
+                .then(({ post: fresh }) => onUpdated(fresh))
+                .catch(() => {
+                  // Keeping the previous count beats blanking it.
+                })
+            }}
+          />
+        </div>
       )}
 
       <ConfirmDialog
