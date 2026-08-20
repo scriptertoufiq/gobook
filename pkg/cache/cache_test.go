@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -340,5 +342,117 @@ func TestBumpCostDoesNotGrowWithTheKeyspace(t *testing.T) {
 	}
 	if n, _ := store.Generation(ctx, "posts:list:gen"); n != 1 {
 		t.Errorf("got %d, want 1", n)
+	}
+}
+
+// The reason single-flight exists: a hot key that has just been invalidated is
+// missed by every concurrent reader at once, and without coalescing every one
+// of them runs the same query.
+func TestConcurrentMissesRunTheQueryOnce(t *testing.T) {
+	store, _ := newRedis(t, "flight")
+	ctx := context.Background()
+
+	var computed atomic.Int64
+	var wg sync.WaitGroup
+
+	const readers = 50
+	release := make(chan struct{})
+
+	for range readers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-release // all miss at the same instant
+
+			_, err := cache.Remember(ctx, store, "posts:hot", time.Minute,
+				func() (post, error) {
+					computed.Add(1)
+					// Long enough that the others are certainly waiting.
+					time.Sleep(40 * time.Millisecond)
+					return post{ID: 1, Title: "expensive"}, nil
+				})
+			if err != nil {
+				t.Errorf("remember: %v", err)
+			}
+		}()
+	}
+
+	close(release)
+	wg.Wait()
+
+	if n := computed.Load(); n != 1 {
+		t.Errorf("%d readers caused %d queries, want 1", readers, n)
+	}
+}
+
+// Every waiter must receive the value, not just the one that computed it.
+func TestEveryWaiterGetsTheComputedValue(t *testing.T) {
+	store, _ := newRedis(t, "flight")
+	ctx := context.Background()
+
+	var wg sync.WaitGroup
+	results := make([]post, 20)
+	release := make(chan struct{})
+
+	for i := range results {
+		wg.Add(1)
+		go func(slot int) {
+			defer wg.Done()
+			<-release
+			got, err := cache.Remember(ctx, store, "posts:shared", time.Minute,
+				func() (post, error) {
+					time.Sleep(30 * time.Millisecond)
+					return post{ID: 99, Title: "one value for everybody"}, nil
+				})
+			if err != nil {
+				t.Errorf("remember: %v", err)
+				return
+			}
+			results[slot] = got
+		}(i)
+	}
+
+	close(release)
+	wg.Wait()
+
+	for i, got := range results {
+		if got.ID != 99 || got.Title != "one value for everybody" {
+			t.Errorf("waiter %d got %+v", i, got)
+		}
+	}
+}
+
+// A failing computation must reach every waiter rather than leaving some of
+// them hanging on a value that was never produced.
+func TestComputeErrorReachesEveryWaiter(t *testing.T) {
+	store, _ := newRedis(t, "flight")
+	ctx := context.Background()
+
+	sentinel := errors.New("database is down")
+	var wg sync.WaitGroup
+	failures := atomic.Int64{}
+	release := make(chan struct{})
+
+	for range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-release
+			_, err := cache.Remember(ctx, store, "posts:failing", time.Minute,
+				func() (post, error) {
+					time.Sleep(20 * time.Millisecond)
+					return post{}, sentinel
+				})
+			if errors.Is(err, sentinel) {
+				failures.Add(1)
+			}
+		}()
+	}
+
+	close(release)
+	wg.Wait()
+
+	if n := failures.Load(); n != 10 {
+		t.Errorf("%d of 10 waiters saw the error, want all of them", n)
 	}
 }
