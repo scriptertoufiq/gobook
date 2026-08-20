@@ -55,11 +55,11 @@ func (s *PostService) List(
 	p pagination.Params,
 	authorID uint,
 ) ([]models.Post, pagination.Meta, error) {
-	posts, total, err := s.repo.Paginate(ctx, p, authorID)
+	posts, hasMore, err := s.repo.Paginate(ctx, p, authorID)
 	if err != nil {
 		return nil, pagination.Meta{}, apperror.Internal(err)
 	}
-	return posts, pagination.NewMeta(p, total), nil
+	return posts, pagination.NewOpenMeta(p, hasMore), nil
 }
 
 // Get returns a single post, served from cache when it is there.

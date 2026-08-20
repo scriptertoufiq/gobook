@@ -63,12 +63,19 @@ func (r *fakePostRepo) FindByID(_ context.Context, id uint) (*models.Post, error
 	return &copied, nil
 }
 
-func (r *fakePostRepo) Paginate(_ context.Context, _ pagination.Params, _ uint) ([]models.Post, int64, error) {
+func (r *fakePostRepo) Paginate(_ context.Context, p pagination.Params, _ uint) ([]models.Post, bool, error) {
 	out := make([]models.Post, 0, len(r.posts))
-	for _, p := range r.posts {
-		out = append(out, *p)
+	for _, post := range r.posts {
+		out = append(out, *post)
 	}
-	return out, int64(len(out)), nil
+
+	// Mirrors the real repository: report whether another page exists rather
+	// than how many rows there are.
+	hasMore := len(out) > p.PerPage
+	if hasMore {
+		out = out[:p.PerPage]
+	}
+	return out, hasMore, nil
 }
 
 // activeRedis lets a test evict an entry to simulate expiry.

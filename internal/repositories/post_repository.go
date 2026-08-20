@@ -18,7 +18,11 @@ type PostRepository interface {
 	Delete(ctx context.Context, id uint) error
 	FindByID(ctx context.Context, id uint) (*models.Post, error)
 	// Paginate lists posts, optionally narrowed to one author. Pass 0 for all.
-	Paginate(ctx context.Context, p pagination.Params, userID uint) ([]models.Post, int64, error)
+	//
+	// Reports whether another page exists rather than how many rows match.
+	// The feed is read forwards and never shows a total, and counting two
+	// million rows to answer a question nobody asked costs more than the page.
+	Paginate(ctx context.Context, p pagination.Params, userID uint) ([]models.Post, bool, error)
 }
 
 type postRepository struct {
@@ -57,7 +61,7 @@ func (r *postRepository) Paginate(
 	ctx context.Context,
 	p pagination.Params,
 	userID uint,
-) ([]models.Post, int64, error) {
+) ([]models.Post, bool, error) {
 	query := r.db.WithContext(ctx).Model(&models.Post{})
 
 	if userID > 0 {
@@ -69,17 +73,22 @@ func (r *postRepository) Paginate(
 		query = query.Where("title LIKE ? OR content LIKE ?", like, like)
 	}
 
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
+	// One row more than the page needs. Its presence is the whole answer to
+	// "is there another page", and it never reaches the caller.
 	var posts []models.Post
 	err := query.
 		Order(p.OrderClause(postSortable, "id")).
-		Limit(p.PerPage).
+		Limit(p.Lookahead()).
 		Offset(p.Offset()).
 		Find(&posts).Error
+	if err != nil {
+		return nil, false, err
+	}
 
-	return posts, total, err
+	hasMore := len(posts) > p.PerPage
+	if hasMore {
+		posts = posts[:p.PerPage]
+	}
+
+	return posts, hasMore, nil
 }

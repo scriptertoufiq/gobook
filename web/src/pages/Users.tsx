@@ -52,7 +52,7 @@ export function Users() {
         <div>
           <h1 className="text-xl font-semibold">Users</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            {meta ? `${meta.total} account${meta.total === 1 ? '' : 's'}` : '—'}
+            {meta?.total !== undefined ? `${meta.total} account${meta.total === 1 ? '' : 's'}` : '—'}
           </p>
         </div>
         <input
@@ -128,10 +128,10 @@ export function Users() {
         </table>
       </Card>
 
-      {meta && meta.last_page > 1 && (
+      {meta && (meta.last_page ?? 1) > 1 && (
         <div className="flex items-center justify-between text-sm">
           <span className="text-slate-500 dark:text-slate-400">
-            Page {meta.page} of {meta.last_page}
+            Page {meta.page} of {meta.last_page ?? 1}
           </span>
           <div className="flex gap-2">
             <Button variant="ghost" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
@@ -139,7 +139,7 @@ export function Users() {
             </Button>
             <Button
               variant="ghost"
-              disabled={page >= meta.last_page}
+              disabled={page >= (meta.last_page ?? 1)}
               onClick={() => setPage((p) => p + 1)}
             >
               Next

@@ -26,8 +26,15 @@ export interface Fault {
 export interface PaginationMeta {
   page: number
   per_page: number
-  total: number
-  last_page: number
+  /**
+   * Absent when the result set was not counted. The post feed leaves these out
+   * — counting millions of rows to show a number nobody reads costs more than
+   * the page itself — while smaller listings still report them.
+   */
+  total?: number
+  last_page?: number
+  /** Always present. What an endless list should read. */
+  has_more: boolean
 }
 
 export interface User {
